@@ -115,7 +115,7 @@ Project is chosen **only** from `channels` config (parent channel when inside a 
 | `@Grok /cancel` | Stop the in-progress run in this thread |
 | `@Grok <task>` + attachments | Download files for Grok to read (logs, screenshots, patches) |
 
-While a task is running, the bot updates the status message every ~15s with elapsed time. Use `/cancel` (or `/stop`) in that thread to kill the Grok process.
+While a task is running, the bot updates the status message every ~15s with elapsed time (and a short thought snippet when available). Assistant text streams into the thread via Grok’s `streaming-json` output (edited about every 1.5s). Use `/cancel` (or `/stop`) in that thread to kill the Grok process.
 
 **Worktrees:** when `worktreeIsolation` is on (default) and the project is a git repo, each Discord thread gets its own worktree at `data/worktrees/<project>/<threadId>` on branch `grok/discord/<threadId>`, created from the main checkout’s `HEAD`. Grok runs with `--cwd` set to that worktree so concurrent threads do not share a working tree. `/reset` removes the worktree and deletes the branch. Set `"worktreeIsolation": false` to always use the main project path.
 

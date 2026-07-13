@@ -11,6 +11,7 @@ Feature backlog for grok-discord. Order is suggested priority, not a commitment.
 - [x] Live progress heartbeats + `/cancel` (aliases: `cancel`, `/stop`, `stop`)
 - [x] Discord attachments → prompt context (download, path list, cleanup)
 - [x] Per-thread git worktree isolation (`data/worktrees/`, `/reset` cleanup)
+- [x] Stream Grok output (`streaming-json` → live Discord message edits)
 
 ## Next
 
@@ -21,15 +22,7 @@ Replace (or complement) mention + text parse with application commands.
 - Register `/grok`, `/cancel`, `/status`, `/projects`, `/reset`, `/help`
 - Keep mention path for compatibility during migration
 
-### 2. True streaming of Grok output
-
-Best long-run UX beyond heartbeats; depends on headless `grok` emitting incremental events.
-
-- Stream/parse progressive stdout if the CLI supports it
-- Post or edit partial assistant text in the thread
-- Fall back to heartbeats + final reply when streaming is unavailable
-
-### 3. Idle worktree TTL cleanup
+### 2. Idle worktree TTL cleanup
 
 Worktrees currently live until `/reset`. Optionally prune after N days of inactivity.
 

@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -53,12 +54,16 @@ func TestFormatElapsed(t *testing.T) {
 }
 
 func TestWorkingStatus(t *testing.T) {
-	got := workingStatus("app", 0)
+	got := workingStatus("app", 0, "")
 	if got != "Working in **app**… · `@Grok /cancel` to stop" {
 		t.Fatalf("initial: %q", got)
 	}
-	got = workingStatus("app", 45*time.Second)
+	got = workingStatus("app", 45*time.Second, "")
 	if got != "Working in **app**… · 45s elapsed · `@Grok /cancel` to stop" {
 		t.Fatalf("elapsed: %q", got)
+	}
+	got = workingStatus("app", 45*time.Second, "reading files")
+	if !strings.Contains(got, "reading files") {
+		t.Fatalf("activity: %q", got)
 	}
 }

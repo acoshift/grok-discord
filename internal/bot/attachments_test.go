@@ -14,13 +14,13 @@ import (
 
 func TestSanitizeFilename(t *testing.T) {
 	cases := map[string]string{
-		"error.log":           "error.log",
-		"../../etc/passwd":    "passwd",
-		"weird name!!.txt":    "weird name__.txt",
-		"":                    "file",
-		".":                   "file",
-		"..":                  "file",
-		"a/b/c.png":           "c.png",
+		"error.log":                       "error.log",
+		"../../etc/passwd":                "passwd",
+		"weird name!!.txt":                "weird name__.txt",
+		"":                                "file",
+		".":                               "file",
+		"..":                              "file",
+		"a/b/c.png":                       "c.png",
 		strings.Repeat("x", 200) + ".log": "", // length capped; checked below
 	}
 	for in, want := range cases {

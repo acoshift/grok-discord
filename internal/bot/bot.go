@@ -405,18 +405,21 @@ func (b *Bot) handleTask(s *discordgo.Session, m *discordgo.MessageCreate, parse
 		b.busy.Delete(threadID)
 	}()
 
-	status, err := s.ChannelMessageSend(threadID, workingStatus(proj.Name, 0))
+	status, err := s.ChannelMessageSend(threadID, workingStatus(proj.Name, 0, ""))
 	if err != nil {
 		log.Printf("error: status message thread=%s: %v", threadID, err)
 		return
 	}
+
+	var thoughts thoughtTracker
+	streamer := newStreamPoster(s, threadID)
 
 	stopProgress := make(chan struct{})
 	var progressWG sync.WaitGroup
 	progressWG.Add(1)
 	go func() {
 		defer progressWG.Done()
-		b.progressLoop(s, threadID, status.ID, proj.Name, job.start, stopProgress)
+		b.progressLoop(s, threadID, status.ID, proj.Name, job.start, &thoughts, stopProgress)
 	}()
 
 	runCwd, wtBranch, wtErr := b.resolveRunCwd(ctx, proj, threadID)
@@ -470,7 +473,7 @@ func (b *Bot) handleTask(s *discordgo.Session, m *discordgo.MessageCreate, parse
 		log.Printf("task: resume session=%s", sessionID)
 	}
 
-	log.Printf("task: running grok bin=%s yolo=%v maxTurns=%d timeout=%s cwd=%s",
+	log.Printf("task: running grok bin=%s yolo=%v maxTurns=%d timeout=%s cwd=%s stream=true",
 		b.cfg.GrokBin, b.cfg.YoloEnabled(), b.cfg.MaxTurns, time.Duration(b.cfg.TimeoutMs)*time.Millisecond, runCwd)
 
 	result := grokrun.Run(ctx, grokrun.Options{
@@ -483,7 +486,14 @@ func (b *Bot) handleTask(s *discordgo.Session, m *discordgo.MessageCreate, parse
 		MaxTurns:  b.cfg.MaxTurns,
 		Timeout:   time.Duration(b.cfg.TimeoutMs) * time.Millisecond,
 		ExtraArgs: b.cfg.ExtraArgs,
+		OnTextDelta: func(delta string) {
+			streamer.OnDelta(delta)
+		},
+		OnThought: func(delta string) {
+			thoughts.OnDelta(delta)
+		},
 	})
+	streamer.Flush()
 
 	close(stopProgress)
 	progressWG.Wait()
@@ -539,7 +549,11 @@ func (b *Bot) handleTask(s *discordgo.Session, m *discordgo.MessageCreate, parse
 		log.Printf("error: edit status: %v", err)
 	}
 
-	sendChunks(s, threadID, result.Text)
+	// Prefer streamed message when it already holds the full reply; otherwise
+	// post the complete text (multi-chunk if needed).
+	if !streamer.Finish() {
+		sendChunks(s, threadID, result.Text)
+	}
 
 	if result.Stderr != "" && os.Getenv("GROK_DISCORD_DEBUG") != "" {
 		errText := result.Stderr
@@ -551,8 +565,9 @@ func (b *Bot) handleTask(s *discordgo.Session, m *discordgo.MessageCreate, parse
 	log.Printf("task: finished msg=%s thread=%s", m.ID, threadID)
 }
 
-// progressLoop edits the status message with elapsed time until stop is closed.
-func (b *Bot) progressLoop(s *discordgo.Session, threadID, msgID, project string, start time.Time, stop <-chan struct{}) {
+// progressLoop edits the status message with elapsed time (and optional thought
+// snippet) until stop is closed.
+func (b *Bot) progressLoop(s *discordgo.Session, threadID, msgID, project string, start time.Time, thoughts *thoughtTracker, stop <-chan struct{}) {
 	ticker := time.NewTicker(progressInterval)
 	defer ticker.Stop()
 	for {
@@ -560,7 +575,11 @@ func (b *Bot) progressLoop(s *discordgo.Session, threadID, msgID, project string
 		case <-stop:
 			return
 		case <-ticker.C:
-			text := workingStatus(project, time.Since(start))
+			activity := ""
+			if thoughts != nil {
+				activity = thoughts.Latest()
+			}
+			text := workingStatus(project, time.Since(start), activity)
 			if _, err := s.ChannelMessageEdit(threadID, msgID, text); err != nil {
 				log.Printf("warn: progress edit thread=%s: %v", threadID, err)
 			}
@@ -568,12 +587,19 @@ func (b *Bot) progressLoop(s *discordgo.Session, threadID, msgID, project string
 	}
 }
 
-func workingStatus(project string, elapsed time.Duration) string {
+func workingStatus(project string, elapsed time.Duration, activity string) string {
+	var b strings.Builder
 	if elapsed < time.Second {
-		return fmt.Sprintf("Working in **%s**… · `@Grok /cancel` to stop", project)
+		fmt.Fprintf(&b, "Working in **%s**… · `@Grok /cancel` to stop", project)
+	} else {
+		fmt.Fprintf(&b, "Working in **%s**… · %s elapsed · `@Grok /cancel` to stop",
+			project, formatElapsed(elapsed))
 	}
-	return fmt.Sprintf("Working in **%s**… · %s elapsed · `@Grok /cancel` to stop",
-		project, formatElapsed(elapsed))
+	activity = strings.TrimSpace(activity)
+	if activity != "" {
+		fmt.Fprintf(&b, "\n_%s_", activity)
+	}
+	return b.String()
 }
 
 // formatElapsed renders a compact duration for Discord status lines.

@@ -1,11 +1,13 @@
 package grokrun
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -31,6 +33,12 @@ type Options struct {
 	NoPlan           bool
 	NoMemory         bool
 	DisableWebSearch bool
+
+	// OnTextDelta receives each assistant text fragment when using streaming-json.
+	// When set, Run uses --output-format streaming-json; otherwise json.
+	OnTextDelta func(delta string)
+	// OnThought receives thought/status fragments (optional; streaming only).
+	OnThought func(delta string)
 }
 
 type Result struct {
@@ -45,8 +53,19 @@ type Result struct {
 type jsonOut struct {
 	Type      string `json:"type"`
 	Text      string `json:"text"`
+	Data      string `json:"data"`
 	Message   string `json:"message"`
 	SessionID string `json:"sessionId"`
+}
+
+// streamEvent is one NDJSON line from --output-format streaming-json.
+type streamEvent struct {
+	Type       string `json:"type"`
+	Data       string `json:"data"`
+	Text       string `json:"text"`
+	Message    string `json:"message"`
+	SessionID  string `json:"sessionId"`
+	StopReason string `json:"stopReason"`
 }
 
 // Run executes one headless Grok Build turn.
@@ -57,10 +76,16 @@ func Run(ctx context.Context, opt Options) Result {
 		defer cancel()
 	}
 
+	stream := opt.OnTextDelta != nil || opt.OnThought != nil
+	format := "json"
+	if stream {
+		format = "streaming-json"
+	}
+
 	args := []string{
 		"-p", opt.Prompt,
 		"--cwd", opt.Cwd,
-		"--output-format", "json",
+		"--output-format", format,
 		"--max-turns", fmt.Sprintf("%d", opt.MaxTurns),
 		"--no-auto-update",
 	}
@@ -98,63 +123,130 @@ func Run(ctx context.Context, opt Options) Result {
 			logArgs[i+1] = logArgs[i+1][:200] + "…"
 		}
 	}
-	log.Printf("grokrun: exec bin=%q cwd=%q args=%v", opt.GrokBin, opt.Cwd, logArgs)
+	log.Printf("grokrun: exec bin=%q cwd=%q format=%s args=%v", opt.GrokBin, opt.Cwd, format, logArgs)
 
 	cmd := exec.CommandContext(ctx, opt.GrokBin, args...)
 	cmd.Dir = opt.Cwd
 	cmd.Env = os.Environ()
 
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
+	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
-	err := cmd.Run()
-	code := 0
+	if !stream {
+		var stdout bytes.Buffer
+		cmd.Stdout = &stdout
+		err := cmd.Run()
+		return finishResult(ctx, opt, err, stdout.Bytes(), stderr.String(), opt.Timeout)
+	}
+
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		// Context done first: CommandContext kills the process, so we may also
-		// see ExitError — prefer the context reason.
-		switch {
-		case errors.Is(ctx.Err(), context.DeadlineExceeded):
-			log.Printf("grokrun: timeout after %s stderr=%q", opt.Timeout, truncate(stderr.String(), 1000))
-			return Result{
-				Text:      fmt.Sprintf("Timed out after %s. Partial work may exist in the Grok session.", opt.Timeout),
-				SessionID: opt.SessionID,
-				Code:      124,
-				Stderr:    stderr.String(),
-			}
-		case ctx.Err() != nil:
-			log.Printf("grokrun: cancelled stderr=%q", truncate(stderr.String(), 1000))
-			return Result{
-				Text:      "Cancelled. Partial work may exist in the Grok session.",
-				SessionID: opt.SessionID,
-				Code:      130,
-				Stderr:    stderr.String(),
-				Cancelled: true,
-			}
+		return Result{
+			Text:      fmt.Sprintf("Failed to start grok stdout pipe: %v", err),
+			SessionID: opt.SessionID,
+			Code:      1,
+			Stderr:    stderr.String(),
 		}
-		if ee, ok := err.(*exec.ExitError); ok {
+	}
+	if err := cmd.Start(); err != nil {
+		return Result{
+			Text:      fmt.Sprintf("Failed to start grok: %v", err),
+			SessionID: opt.SessionID,
+			Code:      1,
+			Stderr:    stderr.String(),
+		}
+	}
+
+	text, sessionID, parseErr := consumeStream(stdout, opt.OnTextDelta, opt.OnThought)
+	waitErr := cmd.Wait()
+
+	if sessionID == "" {
+		sessionID = opt.SessionID
+	}
+
+	// Prefer context cancellation over parse/wait errors.
+	if res, ok := contextResult(ctx, opt, stderr.String(), opt.Timeout); ok {
+		if text != "" {
+			res.Text = text
+		}
+		if sessionID != "" {
+			res.SessionID = sessionID
+		}
+		return res
+	}
+
+	code := 0
+	if waitErr != nil {
+		if ee, ok := waitErr.(*exec.ExitError); ok {
 			code = ee.ExitCode()
-			log.Printf("grokrun: exit code=%d err=%v stderr=%q stdoutLen=%d",
-				code, err, truncate(stderr.String(), 1000), stdout.Len())
+			log.Printf("grokrun: exit code=%d err=%v stderr=%q textLen=%d",
+				code, waitErr, truncate(stderr.String(), 1000), len(text))
 		} else {
-			log.Printf("grokrun: start failed: %v stderr=%q", err, truncate(stderr.String(), 1000))
+			log.Printf("grokrun: wait failed: %v stderr=%q", waitErr, truncate(stderr.String(), 1000))
 			return Result{
-				Text:      fmt.Sprintf("Failed to start grok: %v", err),
-				SessionID: opt.SessionID,
+				Text:      fmt.Sprintf("Failed to run grok: %v", waitErr),
+				SessionID: sessionID,
 				Code:      1,
 				Stderr:    stderr.String(),
 			}
 		}
 	} else {
-		log.Printf("grokrun: ok stdoutLen=%d stderrLen=%d", stdout.Len(), stderr.Len())
+		log.Printf("grokrun: ok stream textLen=%d stderrLen=%d", len(text), stderr.Len())
 	}
 
-	out := strings.TrimSpace(stdout.String())
+	if parseErr != nil {
+		log.Printf("grokrun: stream parse note: %v", parseErr)
+	}
+
+	if text == "" {
+		text = strings.TrimSpace(stderr.String())
+		if text == "" {
+			if code != 0 {
+				text = fmt.Sprintf("(grok exited %d with empty stream text)", code)
+			} else {
+				text = "(empty response)"
+			}
+		}
+	}
+
+	return Result{
+		Text:      text,
+		SessionID: sessionID,
+		Code:      code,
+		Stderr:    stderr.String(),
+	}
+}
+
+func finishResult(ctx context.Context, opt Options, err error, stdout []byte, stderr string, timeout time.Duration) Result {
+	if res, ok := contextResult(ctx, opt, stderr, timeout); ok && err != nil {
+		return res
+	}
+
+	code := 0
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			code = ee.ExitCode()
+			log.Printf("grokrun: exit code=%d err=%v stderr=%q stdoutLen=%d",
+				code, err, truncate(stderr, 1000), len(stdout))
+		} else {
+			log.Printf("grokrun: start failed: %v stderr=%q", err, truncate(stderr, 1000))
+			return Result{
+				Text:      fmt.Sprintf("Failed to start grok: %v", err),
+				SessionID: opt.SessionID,
+				Code:      1,
+				Stderr:    stderr,
+			}
+		}
+	} else {
+		log.Printf("grokrun: ok stdoutLen=%d stderrLen=%d", len(stdout), len(stderr))
+	}
+
+	out := strings.TrimSpace(string(stdout))
 	text := out
 	sessionID := opt.SessionID
 
 	var parsed jsonOut
-	if err := json.Unmarshal(stdout.Bytes(), &parsed); err == nil {
+	if err := json.Unmarshal(stdout, &parsed); err == nil {
 		if parsed.Type == "error" {
 			text = parsed.Message
 			if text == "" {
@@ -167,7 +259,7 @@ func Run(ctx context.Context, opt Options) Result {
 			sessionID = parsed.SessionID
 		}
 	} else if out == "" {
-		text = strings.TrimSpace(stderr.String())
+		text = strings.TrimSpace(stderr)
 		if text == "" {
 			text = fmt.Sprintf("(grok exited %d with empty stdout)", code)
 		}
@@ -181,8 +273,107 @@ func Run(ctx context.Context, opt Options) Result {
 		Text:      text,
 		SessionID: sessionID,
 		Code:      code,
-		Stderr:    stderr.String(),
+		Stderr:    stderr,
 	}
+}
+
+func contextResult(ctx context.Context, opt Options, stderr string, timeout time.Duration) (Result, bool) {
+	switch {
+	case errors.Is(ctx.Err(), context.DeadlineExceeded):
+		log.Printf("grokrun: timeout after %s stderr=%q", timeout, truncate(stderr, 1000))
+		return Result{
+			Text:      fmt.Sprintf("Timed out after %s. Partial work may exist in the Grok session.", timeout),
+			SessionID: opt.SessionID,
+			Code:      124,
+			Stderr:    stderr,
+		}, true
+	case ctx.Err() != nil:
+		log.Printf("grokrun: cancelled stderr=%q", truncate(stderr, 1000))
+		return Result{
+			Text:      "Cancelled. Partial work may exist in the Grok session.",
+			SessionID: opt.SessionID,
+			Code:      130,
+			Stderr:    stderr,
+			Cancelled: true,
+		}, true
+	default:
+		return Result{}, false
+	}
+}
+
+// consumeStream reads NDJSON streaming-json events until EOF.
+func consumeStream(r io.Reader, onText, onThought func(string)) (text, sessionID string, err error) {
+	sc := bufio.NewScanner(r)
+	// Thoughts + text can be large; allow big lines.
+	sc.Buffer(make([]byte, 0, 64*1024), 10*1024*1024)
+
+	var b strings.Builder
+	var parseNotes []string
+
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" {
+			continue
+		}
+		var ev streamEvent
+		if jerr := json.Unmarshal([]byte(line), &ev); jerr != nil {
+			parseNotes = append(parseNotes, jerr.Error())
+			continue
+		}
+		switch strings.ToLower(ev.Type) {
+		case "text":
+			delta := ev.Data
+			if delta == "" {
+				delta = ev.Text
+			}
+			if delta != "" {
+				b.WriteString(delta)
+				if onText != nil {
+					onText(delta)
+				}
+			}
+		case "thought":
+			delta := ev.Data
+			if delta == "" {
+				delta = ev.Text
+			}
+			if delta != "" && onThought != nil {
+				onThought(delta)
+			}
+		case "end":
+			if ev.SessionID != "" {
+				sessionID = ev.SessionID
+			}
+		case "error":
+			msg := ev.Message
+			if msg == "" {
+				msg = ev.Data
+			}
+			if msg == "" {
+				msg = ev.Text
+			}
+			if msg != "" {
+				if b.Len() > 0 {
+					b.WriteString("\n\n")
+				}
+				b.WriteString(msg)
+				if onText != nil {
+					onText(msg)
+				}
+			}
+		default:
+			// Ignore tool/other events; session id may appear on them too.
+			if ev.SessionID != "" {
+				sessionID = ev.SessionID
+			}
+		}
+	}
+	if scanErr := sc.Err(); scanErr != nil {
+		err = scanErr
+	} else if len(parseNotes) > 0 {
+		err = fmt.Errorf("skipped %d malformed lines (e.g. %s)", len(parseNotes), parseNotes[0])
+	}
+	return b.String(), sessionID, err
 }
 
 // SummarizeTitle asks Grok for a short Discord thread title (separate one-shot
