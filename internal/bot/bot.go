@@ -13,12 +13,13 @@ import (
 	"github.com/bwmarrin/discordgo"
 
 	"github.com/acoshift/grok-discord/internal/config"
+	"github.com/acoshift/grok-discord/internal/gitworktree"
 	"github.com/acoshift/grok-discord/internal/grokrun"
 	"github.com/acoshift/grok-discord/internal/sessionstore"
 )
 
 const (
-	maxMsg          = 1900
+	maxMsg           = 1900
 	progressInterval = 15 * time.Second
 )
 
@@ -123,12 +124,7 @@ func (b *Bot) onMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 			}
 			return
 		}
-		if err := b.sessions.Delete(m.ChannelID); err != nil {
-			log.Printf("error: session delete: %v", err)
-		}
-		if _, err := s.ChannelMessageSendReply(m.ChannelID, "Session cleared for this thread.", ref(m)); err != nil {
-			log.Printf("error: reply reset: %v", err)
-		}
+		b.resetThread(s, m)
 	case KindStatus:
 		if !isThread(s, m.ChannelID) {
 			if _, err := s.ChannelMessageSendReply(m.ChannelID, "Use `@Grok /status` inside a Grok thread.", ref(m)); err != nil {
@@ -147,12 +143,18 @@ func (b *Bot) onMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 		if job, busy := b.getJob(m.ChannelID); busy {
 			state = "running · " + formatElapsed(time.Since(job.start))
 		}
-		if _, err := s.ChannelMessageSendReply(m.ChannelID, strings.Join([]string{
+		lines := []string{
 			"**project:** " + e.Project,
 			"**session:** `" + e.SessionID + "`",
 			"**updated:** " + e.UpdatedAt,
 			"**state:** " + state,
-		}, "\n"), ref(m)); err != nil {
+		}
+		if e.WorktreeBranch != "" {
+			lines = append(lines, "**worktree:** `"+e.WorktreeBranch+"`")
+		} else {
+			lines = append(lines, "**worktree:** (none — main project cwd)")
+		}
+		if _, err := s.ChannelMessageSendReply(m.ChannelID, strings.Join(lines, "\n"), ref(m)); err != nil {
 			log.Printf("error: reply status: %v", err)
 		}
 	case KindCancel:
@@ -192,6 +194,88 @@ func (b *Bot) handleCancel(s *discordgo.Session, m *discordgo.MessageCreate) {
 	if _, err := s.ChannelMessageSendReply(m.ChannelID, "Cancelling current run…", ref(m)); err != nil {
 		log.Printf("error: reply cancel: %v", err)
 	}
+}
+
+func (b *Bot) resetThread(s *discordgo.Session, m *discordgo.MessageCreate) {
+	if _, busy := b.getJob(m.ChannelID); busy {
+		if _, err := s.ChannelMessageSendReply(m.ChannelID, "A run is in progress — `@Grok /cancel` first, then `/reset`.", ref(m)); err != nil {
+			log.Printf("error: reply reset-busy: %v", err)
+		}
+		return
+	}
+
+	if e, ok := b.sessions.Get(m.ChannelID); ok {
+		mainCwd := e.MainCwd
+		if mainCwd == "" {
+			mainCwd = e.Cwd
+		}
+		// Prefer stored branch; fall back to naming convention.
+		branch := e.WorktreeBranch
+		path := ""
+		if e.WorktreeBranch != "" && e.Cwd != "" && e.Cwd != mainCwd {
+			path = e.Cwd
+		}
+		if path == "" && mainCwd != "" {
+			path = gitworktree.WorktreePath(b.cfg.DataDir, e.Project, m.ChannelID)
+		}
+		if branch == "" {
+			branch = gitworktree.BranchName(m.ChannelID)
+		}
+		if mainCwd != "" && (path != "" || branch != "") {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			if err := gitworktree.Remove(ctx, mainCwd, path, branch); err != nil {
+				log.Printf("warn: worktree cleanup on reset thread=%s: %v", m.ChannelID, err)
+			} else {
+				log.Printf("reset: removed worktree thread=%s branch=%s", m.ChannelID, branch)
+			}
+			cancel()
+		}
+	}
+
+	if err := b.sessions.Delete(m.ChannelID); err != nil {
+		log.Printf("error: session delete: %v", err)
+	}
+	if _, err := s.ChannelMessageSendReply(m.ChannelID, "Session cleared for this thread (worktree removed if any).", ref(m)); err != nil {
+		log.Printf("error: reply reset: %v", err)
+	}
+}
+
+// resolveRunCwd picks the directory Grok should use. When worktree isolation is
+// on and the project is a git repo, returns a per-thread worktree path.
+func (b *Bot) resolveRunCwd(ctx context.Context, proj projectRef, threadID string) (cwd, branch string, err error) {
+	cwd = proj.Cwd
+	if !b.cfg.WorktreeIsolationEnabled() {
+		return cwd, "", nil
+	}
+	if !gitworktree.IsRepo(proj.Cwd) {
+		log.Printf("task: project %s is not a git repo — using main cwd", proj.Name)
+		return cwd, "", nil
+	}
+	// Reuse existing worktree from session when still valid.
+	if e, ok := b.sessions.Get(threadID); ok && e.WorktreeBranch != "" && e.Cwd != "" && e.Cwd != proj.Cwd {
+		if st, statErr := os.Stat(e.Cwd); statErr == nil && st.IsDir() && gitworktree.IsRepo(e.Cwd) {
+			log.Printf("task: reuse session worktree branch=%s", e.WorktreeBranch)
+			return e.Cwd, e.WorktreeBranch, nil
+		}
+	}
+	tree, err := gitworktree.Ensure(ctx, proj.Cwd, b.cfg.DataDir, proj.Name, threadID)
+	if err != nil {
+		return "", "", err
+	}
+	return tree.Path, tree.Branch, nil
+}
+
+func worktreePromptPrefix(branch string) string {
+	if branch == "" {
+		return ""
+	}
+	return strings.Join([]string{
+		"You are working in an isolated git worktree for this Discord thread.",
+		"Branch: " + branch,
+		"Stay in this worktree; do not switch to the main checkout.",
+		"Commit on this branch if you need to save work.",
+		"",
+	}, "\n")
 }
 
 func (b *Bot) isAllowed(s *discordgo.Session, m *discordgo.MessageCreate) bool {
@@ -335,6 +419,23 @@ func (b *Bot) handleTask(s *discordgo.Session, m *discordgo.MessageCreate, parse
 		b.progressLoop(s, threadID, status.ID, proj.Name, job.start, stopProgress)
 	}()
 
+	runCwd, wtBranch, wtErr := b.resolveRunCwd(ctx, proj, threadID)
+	if wtErr != nil {
+		close(stopProgress)
+		progressWG.Wait()
+		log.Printf("error: worktree thread=%s: %v", threadID, wtErr)
+		if _, editErr := s.ChannelMessageEdit(threadID, status.ID, "Failed · worktree"); editErr != nil {
+			log.Printf("error: edit status: %v", editErr)
+		}
+		sendChunks(s, threadID, "Could not create git worktree: "+wtErr.Error())
+		return
+	}
+	if wtBranch != "" {
+		log.Printf("task: worktree branch=%s cwd=%s", wtBranch, runCwd)
+	} else {
+		log.Printf("task: no worktree isolation cwd=%s", runCwd)
+	}
+
 	prompt := parsed.Prompt
 	if len(m.Attachments) > 0 {
 		attDir := filepath.Join(b.cfg.DataDir, "attachments", m.ID)
@@ -359,6 +460,9 @@ func (b *Bot) handleTask(s *discordgo.Session, m *discordgo.MessageCreate, parse
 		prompt = promptWithAttachments(prompt, files)
 		log.Printf("task: saved %d attachment(s)", len(files))
 	}
+	if prefix := worktreePromptPrefix(wtBranch); prefix != "" {
+		prompt = prefix + prompt
+	}
 
 	var sessionID string
 	if e, ok := b.sessions.Get(threadID); ok {
@@ -366,13 +470,13 @@ func (b *Bot) handleTask(s *discordgo.Session, m *discordgo.MessageCreate, parse
 		log.Printf("task: resume session=%s", sessionID)
 	}
 
-	log.Printf("task: running grok bin=%s yolo=%v maxTurns=%d timeout=%s",
-		b.cfg.GrokBin, b.cfg.YoloEnabled(), b.cfg.MaxTurns, time.Duration(b.cfg.TimeoutMs)*time.Millisecond)
+	log.Printf("task: running grok bin=%s yolo=%v maxTurns=%d timeout=%s cwd=%s",
+		b.cfg.GrokBin, b.cfg.YoloEnabled(), b.cfg.MaxTurns, time.Duration(b.cfg.TimeoutMs)*time.Millisecond, runCwd)
 
 	result := grokrun.Run(ctx, grokrun.Options{
 		GrokBin:   b.cfg.GrokBin,
 		Prompt:    prompt,
-		Cwd:       proj.Cwd,
+		Cwd:       runCwd,
 		SessionID: sessionID,
 		Yolo:      b.cfg.YoloEnabled(),
 		Model:     b.cfg.Model,
@@ -401,12 +505,21 @@ func (b *Bot) handleTask(s *discordgo.Session, m *discordgo.MessageCreate, parse
 		log.Printf("error: grok exit code=%d", result.Code)
 	}
 
-	if result.SessionID != "" {
+	// Persist session + worktree even when Grok fails so follow-ups reuse the tree.
+	if result.SessionID != "" || wtBranch != "" {
+		sid := result.SessionID
+		if sid == "" {
+			if e, ok := b.sessions.Get(threadID); ok {
+				sid = e.SessionID
+			}
+		}
 		if err := b.sessions.Set(threadID, sessionstore.Entry{
-			SessionID: result.SessionID,
-			Project:   proj.Name,
-			Cwd:       proj.Cwd,
-			LastUser:  m.Author.String(),
+			SessionID:      sid,
+			Project:        proj.Name,
+			Cwd:            runCwd,
+			MainCwd:        proj.Cwd,
+			WorktreeBranch: wtBranch,
+			LastUser:       m.Author.String(),
 		}); err != nil {
 			log.Printf("error: session save: %v", err)
 		}
@@ -418,6 +531,9 @@ func (b *Bot) handleTask(s *discordgo.Session, m *discordgo.MessageCreate, parse
 		header = fmt.Sprintf("Cancelled · **%s** · %s", proj.Name, formatElapsed(elapsed))
 	case result.Code != 0:
 		header = fmt.Sprintf("Finished with exit **%d** · **%s** · %s", result.Code, proj.Name, formatElapsed(elapsed))
+	}
+	if wtBranch != "" {
+		header += " · worktree"
 	}
 	if _, err := s.ChannelMessageEdit(threadID, status.ID, header); err != nil {
 		log.Printf("error: edit status: %v", err)
@@ -643,5 +759,3 @@ func splitMessage(text string) []string {
 	}
 	return parts
 }
-
-

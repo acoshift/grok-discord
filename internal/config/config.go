@@ -8,21 +8,24 @@ import (
 )
 
 type Config struct {
-	DiscordToken    string            `json:"discordToken"`
-	AllowedUserIDs  []string          `json:"allowedUserIds"`
-	AllowedRoleIDs  []string          `json:"allowedRoleIds"`
+	DiscordToken   string            `json:"discordToken"`
+	AllowedUserIDs []string          `json:"allowedUserIds"`
+	AllowedRoleIDs []string          `json:"allowedRoleIds"`
 	Projects       map[string]string `json:"projects"`
 	Channels       map[string]string `json:"channels"` // channel ID → project name
-	GrokBin               string   `json:"grokBin"`
-	Yolo                  *bool    `json:"yolo"`
-	Model                 string   `json:"model"`
-	MaxTurns              int      `json:"maxTurns"`
-	TimeoutMs             int      `json:"timeoutMs"`
-	ExtraArgs             []string `json:"extraArgs"`
+	GrokBin        string            `json:"grokBin"`
+	Yolo           *bool             `json:"yolo"`
+	Model          string            `json:"model"`
+	MaxTurns       int               `json:"maxTurns"`
+	TimeoutMs      int               `json:"timeoutMs"`
+	ExtraArgs      []string          `json:"extraArgs"`
 	// SummarizeThreadTitle runs a short Grok one-shot to name the Discord thread
 	// before the real task starts. Falls back to a local text trim on failure.
 	SummarizeThreadTitle *bool `json:"summarizeThreadTitle"`
 	SummarizeTimeoutMs   int   `json:"summarizeTimeoutMs"`
+	// WorktreeIsolation runs each Discord thread in its own git worktree under
+	// data/worktrees/ (default true). Non-git projects fall back to the main cwd.
+	WorktreeIsolation *bool `json:"worktreeIsolation"`
 
 	// Resolved at load time
 	AllowedUsers map[string]struct{} `json:"-"`
@@ -43,6 +46,13 @@ func (c *Config) SummarizeTitleEnabled() bool {
 		return true
 	}
 	return *c.SummarizeThreadTitle
+}
+
+func (c *Config) WorktreeIsolationEnabled() bool {
+	if c.WorktreeIsolation == nil {
+		return true
+	}
+	return *c.WorktreeIsolation
 }
 
 func Load() (*Config, error) {

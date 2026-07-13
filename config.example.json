@@ -19,5 +19,6 @@
   "timeoutMs": 1800000,
   "extraArgs": [],
   "summarizeThreadTitle": true,
-  "summarizeTimeoutMs": 45000
+  "summarizeTimeoutMs": 45000,
+  "worktreeIsolation": true
 }

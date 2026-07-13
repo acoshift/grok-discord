@@ -45,6 +45,7 @@ cp config.example.json config.json
 | `yolo` | Auto-approve Grok tools (needed for unattended fix/investigate) |
 | `summarizeThreadTitle` | Call Grok once to name the Discord thread before work (default true) |
 | `summarizeTimeoutMs` | Timeout for the title summary call (default 45000) |
+| `worktreeIsolation` | Per-thread git worktree under `data/worktrees/` (default true; non-git projects use main cwd) |
 
 `config.json` is gitignored. Never commit tokens, user IDs, or private project paths.
 
@@ -109,12 +110,14 @@ Project is chosen **only** from `channels` config (parent channel when inside a 
 | `@Grok <task>` | Run against this channel’s project |
 | `@Grok <follow-up>` in thread | Resume session (same project) |
 | `@Grok /projects` | Show this channel’s mapped project |
-| `@Grok /reset` | Drop session for this thread |
-| `@Grok /status` | Show project + session id |
+| `@Grok /reset` | Drop session + remove this thread’s git worktree |
+| `@Grok /status` | Show project, session, and worktree branch |
 | `@Grok /cancel` | Stop the in-progress run in this thread |
 | `@Grok <task>` + attachments | Download files for Grok to read (logs, screenshots, patches) |
 
 While a task is running, the bot updates the status message every ~15s with elapsed time. Use `/cancel` (or `/stop`) in that thread to kill the Grok process.
+
+**Worktrees:** when `worktreeIsolation` is on (default) and the project is a git repo, each Discord thread gets its own worktree at `data/worktrees/<project>/<threadId>` on branch `grok/discord/<threadId>`, created from the main checkout’s `HEAD`. Grok runs with `--cwd` set to that worktree so concurrent threads do not share a working tree. `/reset` removes the worktree and deletes the branch. Set `"worktreeIsolation": false` to always use the main project path.
 
 **Attachments:** files on the `@Grok` message are downloaded under `data/attachments/<messageId>/`, absolute paths are added to the prompt, and the directory is deleted when the run finishes. Limits: 10 files, 25 MiB each, 50 MiB total. A mention with only attachments (no text) still starts a task.
 
@@ -181,6 +184,7 @@ main.go
 internal/config/       # config.json loader
 internal/bot/          # Discord handlers, prompt parsing
 internal/grokrun/      # exec grok -p
+internal/gitworktree/  # per-thread git worktree isolation
 internal/sessionstore/ # thread → session persistence
 config.example.json
 ```
