@@ -126,3 +126,69 @@ func TestDownloadAttachmentsOversize(t *testing.T) {
 		t.Fatal("expected oversize error")
 	}
 }
+
+func TestPromptWithReferenced(t *testing.T) {
+	ref := &discordgo.Message{
+		ID:      "99",
+		Content: "see this crash",
+		Author:  &discordgo.User{Username: "alice", GlobalName: "Alice"},
+		Attachments: []*discordgo.MessageAttachment{
+			{ID: "a1", Filename: "shot.png"},
+		},
+	}
+	got := promptWithReferenced("what is wrong?", ref)
+	if !strings.Contains(got, "what is wrong?") {
+		t.Fatalf("missing user prompt: %q", got)
+	}
+	if !strings.Contains(got, "Alice") {
+		t.Fatalf("missing author: %q", got)
+	}
+	if !strings.Contains(got, "see this crash") {
+		t.Fatalf("missing ref content: %q", got)
+	}
+	if !strings.Contains(got, "1 attachment") {
+		t.Fatalf("missing attachment note: %q", got)
+	}
+
+	got = promptWithReferenced("", ref)
+	if !strings.HasPrefix(got, "Please review the referenced Discord message.") {
+		t.Fatalf("empty prompt default: %q", got)
+	}
+	if promptWithReferenced("hi", nil) != "hi" {
+		t.Fatal("nil ref should leave prompt unchanged")
+	}
+}
+
+func TestCollectAttachments(t *testing.T) {
+	primary := []*discordgo.MessageAttachment{
+		{ID: "1", Filename: "a.txt", URL: "http://x/a"},
+		{ID: "2", Filename: "b.txt", URL: "http://x/b"},
+	}
+	related := &discordgo.Message{
+		Attachments: []*discordgo.MessageAttachment{
+			{ID: "2", Filename: "b.txt", URL: "http://x/b"}, // dupe
+			{ID: "3", Filename: "c.png", URL: "http://x/c"},
+		},
+	}
+	got := collectAttachments(primary, related)
+	if len(got) != 3 {
+		t.Fatalf("got %d want 3", len(got))
+	}
+	if n := len(collectAttachments(nil, nil)); n != 0 {
+		t.Fatalf("empty merge len=%d", n)
+	}
+}
+
+func TestHasMessageReference(t *testing.T) {
+	if hasMessageReference(nil) {
+		t.Fatal("nil should be false")
+	}
+	m := &discordgo.MessageCreate{Message: &discordgo.Message{}}
+	if hasMessageReference(m) {
+		t.Fatal("no reference should be false")
+	}
+	m.MessageReference = &discordgo.MessageReference{MessageID: "1"}
+	if !hasMessageReference(m) {
+		t.Fatal("expected true")
+	}
+}

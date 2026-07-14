@@ -11,6 +11,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -48,6 +49,72 @@ type Result struct {
 	Stderr    string
 	// Cancelled is true when the parent context was cancelled (e.g. Discord /cancel).
 	Cancelled bool
+
+	// Usage is turn spend from headless json / streaming-json end (nil if omitted).
+	Usage    *Usage
+	NumTurns int
+
+	// ContextTokensUsed / ContextWindowTokens come from the session signals file
+	// after the run (context window fill). Zero when unavailable.
+	ContextTokensUsed   int
+	ContextWindowTokens int
+}
+
+// Usage is token spend for a headless turn (snake_case fields from Grok CLI).
+type Usage struct {
+	InputTokens          int `json:"input_tokens"`
+	CacheReadInputTokens int `json:"cache_read_input_tokens"`
+	OutputTokens         int `json:"output_tokens"`
+	ReasoningTokens      int `json:"reasoning_tokens"`
+	TotalTokens          int `json:"total_tokens"`
+}
+
+// PromptTokens is uncached input + cache hits (tokens present in the prompt).
+func (u *Usage) PromptTokens() int {
+	if u == nil {
+		return 0
+	}
+	return u.InputTokens + u.CacheReadInputTokens
+}
+
+// ContextSummary formats "used/size" for Discord status lines, e.g. "4.8k/500k".
+// Falls back to prompt tokens from Usage when signals are missing.
+func (r Result) ContextSummary() string {
+	if r.ContextWindowTokens > 0 {
+		return formatTokenCount(r.ContextTokensUsed) + "/" + formatTokenCount(r.ContextWindowTokens)
+	}
+	if r.Usage != nil {
+		if n := r.Usage.PromptTokens(); n > 0 {
+			return "~" + formatTokenCount(n)
+		}
+		if r.Usage.TotalTokens > 0 {
+			return "~" + formatTokenCount(r.Usage.TotalTokens)
+		}
+	}
+	return ""
+}
+
+func formatTokenCount(n int) string {
+	if n < 0 {
+		n = 0
+	}
+	switch {
+	case n >= 1_000_000:
+		v := float64(n) / 1_000_000
+		if v >= 10 || n%1_000_000 == 0 {
+			return fmt.Sprintf("%dM", n/1_000_000)
+		}
+		return fmt.Sprintf("%.1fM", v)
+	case n >= 10_000:
+		return fmt.Sprintf("%dk", n/1000)
+	case n >= 1000:
+		if n%1000 == 0 {
+			return fmt.Sprintf("%dk", n/1000)
+		}
+		return fmt.Sprintf("%.1fk", float64(n)/1000)
+	default:
+		return fmt.Sprintf("%d", n)
+	}
 }
 
 type jsonOut struct {
@@ -56,6 +123,8 @@ type jsonOut struct {
 	Data      string `json:"data"`
 	Message   string `json:"message"`
 	SessionID string `json:"sessionId"`
+	NumTurns  int    `json:"num_turns"`
+	Usage     *Usage `json:"usage"`
 }
 
 // streamEvent is one NDJSON line from --output-format streaming-json.
@@ -66,6 +135,8 @@ type streamEvent struct {
 	Message    string `json:"message"`
 	SessionID  string `json:"sessionId"`
 	StopReason string `json:"stopReason"`
+	NumTurns   int    `json:"num_turns"`
+	Usage      *Usage `json:"usage"`
 }
 
 // Run executes one headless Grok Build turn.
@@ -157,9 +228,11 @@ func Run(ctx context.Context, opt Options) Result {
 		}
 	}
 
-	text, sessionID, parseErr := consumeStream(stdout, opt.OnTextDelta, opt.OnThought)
+	streamed, parseErr := consumeStream(stdout, opt.OnTextDelta, opt.OnThought)
 	waitErr := cmd.Wait()
 
+	text := streamed.Text
+	sessionID := streamed.SessionID
 	if sessionID == "" {
 		sessionID = opt.SessionID
 	}
@@ -172,6 +245,9 @@ func Run(ctx context.Context, opt Options) Result {
 		if sessionID != "" {
 			res.SessionID = sessionID
 		}
+		res.Usage = streamed.Usage
+		res.NumTurns = streamed.NumTurns
+		enrichContext(&res, opt.Cwd)
 		return res
 	}
 
@@ -183,12 +259,16 @@ func Run(ctx context.Context, opt Options) Result {
 				code, waitErr, truncate(stderr.String(), 1000), len(text))
 		} else {
 			log.Printf("grokrun: wait failed: %v stderr=%q", waitErr, truncate(stderr.String(), 1000))
-			return Result{
+			res := Result{
 				Text:      fmt.Sprintf("Failed to run grok: %v", waitErr),
 				SessionID: sessionID,
 				Code:      1,
 				Stderr:    stderr.String(),
+				Usage:     streamed.Usage,
+				NumTurns:  streamed.NumTurns,
 			}
+			enrichContext(&res, opt.Cwd)
+			return res
 		}
 	} else {
 		log.Printf("grokrun: ok stream textLen=%d stderrLen=%d", len(text), stderr.Len())
@@ -209,12 +289,16 @@ func Run(ctx context.Context, opt Options) Result {
 		}
 	}
 
-	return Result{
+	res := Result{
 		Text:      text,
 		SessionID: sessionID,
 		Code:      code,
 		Stderr:    stderr.String(),
+		Usage:     streamed.Usage,
+		NumTurns:  streamed.NumTurns,
 	}
+	enrichContext(&res, opt.Cwd)
+	return res
 }
 
 func finishResult(ctx context.Context, opt Options, err error, stdout []byte, stderr string, timeout time.Duration) Result {
@@ -244,6 +328,8 @@ func finishResult(ctx context.Context, opt Options, err error, stdout []byte, st
 	out := strings.TrimSpace(string(stdout))
 	text := out
 	sessionID := opt.SessionID
+	var usage *Usage
+	var numTurns int
 
 	var parsed jsonOut
 	if err := json.Unmarshal(stdout, &parsed); err == nil {
@@ -258,6 +344,8 @@ func finishResult(ctx context.Context, opt Options, err error, stdout []byte, st
 		if parsed.SessionID != "" {
 			sessionID = parsed.SessionID
 		}
+		usage = parsed.Usage
+		numTurns = parsed.NumTurns
 	} else if out == "" {
 		text = strings.TrimSpace(stderr)
 		if text == "" {
@@ -269,12 +357,16 @@ func finishResult(ctx context.Context, opt Options, err error, stdout []byte, st
 		text = "(empty response)"
 	}
 
-	return Result{
+	res := Result{
 		Text:      text,
 		SessionID: sessionID,
 		Code:      code,
 		Stderr:    stderr,
+		Usage:     usage,
+		NumTurns:  numTurns,
 	}
+	enrichContext(&res, opt.Cwd)
+	return res
 }
 
 func contextResult(ctx context.Context, opt Options, stderr string, timeout time.Duration) (Result, bool) {
@@ -301,8 +393,15 @@ func contextResult(ctx context.Context, opt Options, stderr string, timeout time
 	}
 }
 
+type streamOut struct {
+	Text      string
+	SessionID string
+	Usage     *Usage
+	NumTurns  int
+}
+
 // consumeStream reads NDJSON streaming-json events until EOF.
-func consumeStream(r io.Reader, onText, onThought func(string)) (text, sessionID string, err error) {
+func consumeStream(r io.Reader, onText, onThought func(string)) (out streamOut, err error) {
 	sc := bufio.NewScanner(r)
 	// Thoughts + text can be large; allow big lines.
 	sc.Buffer(make([]byte, 0, 64*1024), 10*1024*1024)
@@ -342,7 +441,13 @@ func consumeStream(r io.Reader, onText, onThought func(string)) (text, sessionID
 			}
 		case "end":
 			if ev.SessionID != "" {
-				sessionID = ev.SessionID
+				out.SessionID = ev.SessionID
+			}
+			if ev.Usage != nil {
+				out.Usage = ev.Usage
+			}
+			if ev.NumTurns > 0 {
+				out.NumTurns = ev.NumTurns
 			}
 		case "error":
 			msg := ev.Message
@@ -361,19 +466,111 @@ func consumeStream(r io.Reader, onText, onThought func(string)) (text, sessionID
 					onText(msg)
 				}
 			}
+			// Errors may still carry frozen spend fields.
+			if ev.Usage != nil {
+				out.Usage = ev.Usage
+			}
+			if ev.NumTurns > 0 {
+				out.NumTurns = ev.NumTurns
+			}
+			if ev.SessionID != "" {
+				out.SessionID = ev.SessionID
+			}
 		default:
 			// Ignore tool/other events; session id may appear on them too.
 			if ev.SessionID != "" {
-				sessionID = ev.SessionID
+				out.SessionID = ev.SessionID
 			}
 		}
 	}
+	out.Text = b.String()
 	if scanErr := sc.Err(); scanErr != nil {
 		err = scanErr
 	} else if len(parseNotes) > 0 {
 		err = fmt.Errorf("skipped %d malformed lines (e.g. %s)", len(parseNotes), parseNotes[0])
 	}
-	return b.String(), sessionID, err
+	return out, err
+}
+
+// enrichContext fills ContextTokensUsed / ContextWindowTokens from the session
+// signals file written by the Grok CLI under ~/.grok/sessions.
+func enrichContext(res *Result, cwd string) {
+	if res == nil || res.SessionID == "" {
+		return
+	}
+	path, ok := findSignalsPath(cwd, res.SessionID)
+	if !ok {
+		return
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		log.Printf("grokrun: read signals %s: %v", path, err)
+		return
+	}
+	var sig struct {
+		ContextTokensUsed   int `json:"contextTokensUsed"`
+		ContextWindowTokens int `json:"contextWindowTokens"`
+	}
+	if err := json.Unmarshal(data, &sig); err != nil {
+		log.Printf("grokrun: parse signals %s: %v", path, err)
+		return
+	}
+	if sig.ContextWindowTokens <= 0 && sig.ContextTokensUsed <= 0 {
+		return
+	}
+	res.ContextTokensUsed = sig.ContextTokensUsed
+	res.ContextWindowTokens = sig.ContextWindowTokens
+	log.Printf("grokrun: context %d/%d session=%s",
+		res.ContextTokensUsed, res.ContextWindowTokens, res.SessionID)
+}
+
+func findSignalsPath(cwd, sessionID string) (string, bool) {
+	home := grokHome()
+	if home == "" || sessionID == "" {
+		return "", false
+	}
+	// Prefer the cwd-encoded layout used by the CLI.
+	if abs, err := filepath.Abs(cwd); err == nil && abs != "" {
+		p := filepath.Join(home, "sessions", encodeSessionDir(abs), sessionID, "signals.json")
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			return p, true
+		}
+	}
+	// Fallback: session IDs are unique UUIDs.
+	matches, err := filepath.Glob(filepath.Join(home, "sessions", "*", sessionID, "signals.json"))
+	if err != nil || len(matches) == 0 {
+		return "", false
+	}
+	return matches[0], true
+}
+
+func grokHome() string {
+	if h := strings.TrimSpace(os.Getenv("GROK_HOME")); h != "" {
+		return h
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
+	return filepath.Join(home, ".grok")
+}
+
+// encodeSessionDir percent-encodes an absolute path the way Grok names session dirs
+// (e.g. /Users/me/proj → %2FUsers%2Fme%2Fproj).
+func encodeSessionDir(abs string) string {
+	var b strings.Builder
+	b.Grow(len(abs) * 3)
+	for i := 0; i < len(abs); i++ {
+		c := abs[i]
+		// Unreserved + alphanumeric stay literal (RFC 3986); everything else %XX.
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+			c == '-' || c == '_' || c == '.' || c == '~' {
+			b.WriteByte(c)
+		} else {
+			fmt.Fprintf(&b, "%%%02X", c)
+		}
+	}
+	return b.String()
 }
 
 // SummarizeTitle asks Grok for a short Discord thread title (separate one-shot

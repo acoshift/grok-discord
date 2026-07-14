@@ -152,6 +152,104 @@ func promptWithAttachments(userPrompt string, files []savedAttachment) string {
 	return strings.TrimSpace(b.String())
 }
 
+// promptWithReferenced prepends context from the Discord message being replied to.
+func promptWithReferenced(userPrompt string, ref *discordgo.Message) string {
+	userPrompt = strings.TrimSpace(userPrompt)
+	if ref == nil {
+		return userPrompt
+	}
+
+	var b strings.Builder
+	if userPrompt != "" {
+		b.WriteString(userPrompt)
+		b.WriteString("\n\n")
+	} else {
+		b.WriteString("Please review the referenced Discord message.\n\n")
+	}
+
+	author := "unknown"
+	if ref.Author != nil {
+		author = ref.Author.DisplayName()
+	}
+	fmt.Fprintf(&b, "The user is replying to this earlier Discord message from %s", author)
+	if ref.ID != "" {
+		fmt.Fprintf(&b, " (id=%s)", ref.ID)
+	}
+	b.WriteString(":\n")
+
+	content := strings.TrimSpace(ref.Content)
+	if content != "" {
+		b.WriteString("---\n")
+		b.WriteString(content)
+		b.WriteString("\n---\n")
+	} else {
+		b.WriteString("(no text content)\n")
+	}
+	if n := len(ref.Attachments); n > 0 {
+		fmt.Fprintf(&b, "Referenced message has %d attachment(s); files are listed below when downloaded.\n", n)
+	}
+	return strings.TrimSpace(b.String())
+}
+
+// collectAttachments merges attachments from the mention message and optional reply target.
+// Dedupes by attachment ID when present.
+func collectAttachments(primary []*discordgo.MessageAttachment, related *discordgo.Message) []*discordgo.MessageAttachment {
+	seen := map[string]struct{}{}
+	out := make([]*discordgo.MessageAttachment, 0, len(primary)+4)
+	add := func(list []*discordgo.MessageAttachment) {
+		for _, a := range list {
+			if a == nil {
+				continue
+			}
+			key := a.ID
+			if key == "" {
+				key = a.URL
+			}
+			if key != "" {
+				if _, ok := seen[key]; ok {
+					continue
+				}
+				seen[key] = struct{}{}
+			}
+			out = append(out, a)
+		}
+	}
+	add(primary)
+	if related != nil {
+		add(related.Attachments)
+	}
+	return out
+}
+
+// resolveReferencedMessage returns the message this one replies to, if any.
+// Uses the gateway payload when present; otherwise fetches via REST.
+func resolveReferencedMessage(s *discordgo.Session, m *discordgo.MessageCreate) (*discordgo.Message, error) {
+	if m == nil {
+		return nil, nil
+	}
+	if m.ReferencedMessage != nil {
+		return m.ReferencedMessage, nil
+	}
+	if m.MessageReference == nil || m.MessageReference.MessageID == "" {
+		return nil, nil
+	}
+	// Deleted reference is often present as a non-nil MessageReference with
+	// a null referenced_message; still attempt fetch in case state is unknown.
+	channelID := m.MessageReference.ChannelID
+	if channelID == "" {
+		channelID = m.ChannelID
+	}
+	msg, err := s.ChannelMessage(channelID, m.MessageReference.MessageID)
+	if err != nil {
+		return nil, fmt.Errorf("fetch referenced message %s: %w", m.MessageReference.MessageID, err)
+	}
+	return msg, nil
+}
+
+func hasMessageReference(m *discordgo.MessageCreate) bool {
+	return m != nil && m.MessageReference != nil && m.MessageReference.MessageID != ""
+}
+
 func sanitizeFilename(name string) string {
 	name = strings.TrimSpace(name)
 	name = filepath.Base(name)

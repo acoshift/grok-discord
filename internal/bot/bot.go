@@ -21,6 +21,7 @@ import (
 const (
 	maxMsg           = 1900
 	progressInterval = 15 * time.Second
+	maxFollowupQueue = 5 // pending tasks per thread (not counting the active run)
 )
 
 // runJob is an in-flight Grok run for one Discord thread.
@@ -30,15 +31,99 @@ type runJob struct {
 	project string
 }
 
+// taskItem is a Grok task ready to run (or waiting in a thread's queue).
+type taskItem struct {
+	s        *discordgo.Session
+	m        *discordgo.MessageCreate
+	parsed   Parsed
+	proj     projectRef
+	threadID string
+}
+
+// threadState tracks the active run and follow-up queue for one Discord thread.
+type threadState struct {
+	mu    sync.Mutex
+	job   *runJob
+	queue []taskItem
+}
+
 type Bot struct {
 	cfg      *config.Config
 	sessions *sessionstore.Store
-	busy     sync.Map // threadID → *runJob
+	states   sync.Map // threadID → *threadState
 }
 
 func New(cfg *config.Config, sessions *sessionstore.Store) *Bot {
 	return &Bot{cfg: cfg, sessions: sessions}
 }
+
+func (b *Bot) stateFor(threadID string) *threadState {
+	v, _ := b.states.LoadOrStore(threadID, &threadState{})
+	return v.(*threadState)
+}
+
+// claimOrEnqueue starts the task immediately if the thread is idle, otherwise
+// appends it to the follow-up queue. claimed=true means the caller owns the run.
+func (b *Bot) claimOrEnqueue(threadID string, job *runJob, item taskItem) (claimed bool, queuePos int, err error) {
+	st := b.stateFor(threadID)
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if st.job != nil {
+		if len(st.queue) >= maxFollowupQueue {
+			return false, 0, errQueueFull
+		}
+		st.queue = append(st.queue, item)
+		return false, len(st.queue), nil
+	}
+	st.job = job
+	return true, 0, nil
+}
+
+// finishRun ends the current job. If follow-ups remain, returns the next task
+// while keeping the thread marked busy so concurrent messages still enqueue.
+// Otherwise clears the job and returns ok=false.
+func (b *Bot) finishRun(threadID string) (next taskItem, ok bool) {
+	st := b.stateFor(threadID)
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if len(st.queue) == 0 {
+		st.job = nil
+		return taskItem{}, false
+	}
+	next = st.queue[0]
+	st.queue = st.queue[1:]
+	return next, true
+}
+
+func (b *Bot) replaceJob(threadID string, job *runJob) {
+	st := b.stateFor(threadID)
+	st.mu.Lock()
+	st.job = job
+	st.mu.Unlock()
+}
+
+func (b *Bot) queueLen(threadID string) int {
+	v, ok := b.states.Load(threadID)
+	if !ok {
+		return 0
+	}
+	st := v.(*threadState)
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	return len(st.queue)
+}
+
+// clearQueue drops pending follow-ups (does not cancel an active run).
+func (b *Bot) clearQueue(threadID string) int {
+	st := b.stateFor(threadID)
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	n := len(st.queue)
+	st.queue = nil
+	return n
+}
+
+var errQueueFull = fmt.Errorf("follow-up queue is full (max %d)", maxFollowupQueue)
 
 func (b *Bot) Register(s *discordgo.Session) {
 	s.AddHandler(b.onReady)
@@ -100,11 +185,17 @@ func (b *Bot) onMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 	parsed := ParseMessage(m.Content, s.State.User.ID)
 	// Bare @mention with files only still counts as a task.
-	if parsed.Kind == KindEmpty && len(m.Attachments) > 0 {
-		parsed = Parsed{Kind: KindTask, Prompt: "Please review the attached files."}
+	// Same for a bare @mention that replies to another message (e.g. an image).
+	if parsed.Kind == KindEmpty {
+		switch {
+		case len(m.Attachments) > 0:
+			parsed = Parsed{Kind: KindTask, Prompt: "Please review the attached files."}
+		case hasMessageReference(m):
+			parsed = Parsed{Kind: KindTask, Prompt: "Please review the referenced message."}
+		}
 	}
-	log.Printf("parse: kind=%s prompt=%q attachments=%d",
-		kindName(parsed.Kind), truncate(parsed.Prompt, 300), len(m.Attachments))
+	log.Printf("parse: kind=%s prompt=%q attachments=%d reply=%v",
+		kindName(parsed.Kind), truncate(parsed.Prompt, 300), len(m.Attachments), hasMessageReference(m))
 
 	switch parsed.Kind {
 	case KindEmpty, KindHelp:
@@ -142,6 +233,9 @@ func (b *Bot) onMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 		state := "idle"
 		if job, busy := b.getJob(m.ChannelID); busy {
 			state = "running · " + formatElapsed(time.Since(job.start))
+			if n := b.queueLen(m.ChannelID); n > 0 {
+				state += fmt.Sprintf(" · %d queued", n)
+			}
 		}
 		lines := []string{
 			"**project:** " + e.Project,
@@ -166,12 +260,17 @@ func (b *Bot) onMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 }
 
 func (b *Bot) getJob(threadID string) (*runJob, bool) {
-	v, ok := b.busy.Load(threadID)
+	v, ok := b.states.Load(threadID)
 	if !ok {
 		return nil, false
 	}
-	job, ok := v.(*runJob)
-	return job, ok
+	st := v.(*threadState)
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if st.job == nil {
+		return nil, false
+	}
+	return st.job, true
 }
 
 func (b *Bot) handleCancel(s *discordgo.Session, m *discordgo.MessageCreate) {
@@ -188,12 +287,24 @@ func (b *Bot) handleCancel(s *discordgo.Session, m *discordgo.MessageCreate) {
 		}
 		return
 	}
-	log.Printf("cancel: thread=%s project=%s elapsed=%s user=%s",
-		m.ChannelID, job.project, formatElapsed(time.Since(job.start)), m.Author.String())
+	n := b.queueLen(m.ChannelID)
+	log.Printf("cancel: thread=%s project=%s elapsed=%s queued=%d user=%s",
+		m.ChannelID, job.project, formatElapsed(time.Since(job.start)), n, m.Author.String())
 	job.cancel()
-	if _, err := s.ChannelMessageSendReply(m.ChannelID, "Cancelling current run…", ref(m)); err != nil {
+	msg := "Cancelling current run…"
+	if n > 0 {
+		msg = fmt.Sprintf("Cancelling current run… (%d follow-up%s still queued)", n, plural(n))
+	}
+	if _, err := s.ChannelMessageSendReply(m.ChannelID, msg, ref(m)); err != nil {
 		log.Printf("error: reply cancel: %v", err)
 	}
+}
+
+func plural(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
 }
 
 func (b *Bot) resetThread(s *discordgo.Session, m *discordgo.MessageCreate) {
@@ -202,6 +313,9 @@ func (b *Bot) resetThread(s *discordgo.Session, m *discordgo.MessageCreate) {
 			log.Printf("error: reply reset-busy: %v", err)
 		}
 		return
+	}
+	if n := b.clearQueue(m.ChannelID); n > 0 {
+		log.Printf("reset: cleared %d queued follow-up(s) thread=%s", n, m.ChannelID)
 	}
 
 	if e, ok := b.sessions.Get(m.ChannelID); ok {
@@ -265,17 +379,37 @@ func (b *Bot) resolveRunCwd(ctx context.Context, proj projectRef, threadID strin
 	return tree.Path, tree.Branch, nil
 }
 
-func worktreePromptPrefix(branch string) string {
-	if branch == "" {
-		return ""
+// remoteWorkPromptPrefix instructs Grok for Discord (remote) sessions: never leave
+// work as local-only commits — push and open a PR when code changes are made.
+func remoteWorkPromptPrefix(branch string) string {
+	lines := []string{
+		"You are working remotely via Discord on a shared machine — not a local interactive session.",
 	}
-	return strings.Join([]string{
-		"You are working in an isolated git worktree for this Discord thread.",
-		"Branch: " + branch,
-		"Stay in this worktree; do not switch to the main checkout.",
-		"Commit on this branch if you need to save work.",
+	if branch != "" {
+		lines = append(lines,
+			"Isolated git worktree for this Discord thread.",
+			"Branch: "+branch,
+			"Stay in this worktree; do not switch to the main checkout.",
+			"When you make code changes you MUST:",
+			"1. Commit on this branch only (never commit to main/master).",
+			"2. Push the branch to the remote (`git push -u origin HEAD`).",
+			"3. Open a pull request with `gh pr create` (or push to update an existing PR for this branch).",
+		)
+	} else {
+		lines = append(lines,
+			"When you make code changes in a git repository you MUST:",
+			"1. Create or use a feature branch (never commit directly to main/master).",
+			"2. Commit on that branch.",
+			"3. Push the branch and open a pull request with `gh pr create` (or update an existing PR).",
+			"If this is not a git repository, skip PR steps and say so.",
+		)
+	}
+	lines = append(lines,
+		"Do not leave work as local-only commits. Do not merge the PR.",
+		"Include the PR URL in your final reply to Discord.",
 		"",
-	}, "\n")
+	)
+	return strings.Join(lines, "\n")
 }
 
 func (b *Bot) isAllowed(s *discordgo.Session, m *discordgo.MessageCreate) bool {
@@ -363,8 +497,15 @@ func (b *Bot) handleTask(s *discordgo.Session, m *discordgo.MessageCreate, parse
 	log.Printf("task: project=%s cwd=%s", proj.Name, proj.Cwd)
 
 	titlePrompt := parsed.Prompt
-	if titlePrompt == "" && len(m.Attachments) > 0 {
-		titlePrompt = "attachments: " + m.Attachments[0].Filename
+	if titlePrompt == "" || titlePrompt == "Please review the attached files." || titlePrompt == "Please review the referenced message." {
+		switch {
+		case len(m.Attachments) > 0:
+			titlePrompt = "attachments: " + m.Attachments[0].Filename
+		case m.ReferencedMessage != nil && len(m.ReferencedMessage.Attachments) > 0:
+			titlePrompt = "attachments: " + m.ReferencedMessage.Attachments[0].Filename
+		case m.ReferencedMessage != nil && strings.TrimSpace(m.ReferencedMessage.Content) != "":
+			titlePrompt = m.ReferencedMessage.Content
+		}
 	}
 	title := threadNameFromPrompt(titlePrompt, m.Author.Username)
 	needTitle := !isThread(s, m.ChannelID) || shouldRetitleThread(s, m.ChannelID)
@@ -390,20 +531,58 @@ func (b *Bot) handleTask(s *discordgo.Session, m *discordgo.MessageCreate, parse
 	}
 	log.Printf("task: thread=%s title=%q", threadID, title)
 
+	item := taskItem{s: s, m: m, parsed: parsed, proj: proj, threadID: threadID}
 	ctx, cancel := context.WithCancel(context.Background())
 	job := &runJob{cancel: cancel, start: time.Now(), project: proj.Name}
-	if _, loaded := b.busy.LoadOrStore(threadID, job); loaded {
+	claimed, queuePos, qerr := b.claimOrEnqueue(threadID, job, item)
+	if qerr != nil {
 		cancel()
-		log.Printf("task: busy thread=%s", threadID)
-		if _, sendErr := s.ChannelMessageSend(threadID, "Already working in this thread — wait for the current run to finish, or `@Grok /cancel`."); sendErr != nil {
-			log.Printf("error: reply busy: %v", sendErr)
+		log.Printf("task: queue full thread=%s", threadID)
+		if _, sendErr := s.ChannelMessageSend(threadID, fmt.Sprintf(
+			"Follow-up queue is full (max %d). Wait for a run to finish, or `@Grok /cancel`.", maxFollowupQueue,
+		)); sendErr != nil {
+			log.Printf("error: reply queue-full: %v", sendErr)
 		}
 		return
 	}
-	defer func() {
+	if !claimed {
 		cancel()
-		b.busy.Delete(threadID)
-	}()
+		log.Printf("task: queued pos=%d thread=%s msg=%s", queuePos, threadID, m.ID)
+		if _, sendErr := s.ChannelMessageSend(threadID, fmt.Sprintf(
+			"Queued (#%d). Will run after the current task finishes.", queuePos,
+		)); sendErr != nil {
+			log.Printf("error: reply queued: %v", sendErr)
+		}
+		return
+	}
+
+	// This goroutine owns the thread runner until the queue drains.
+	for {
+		b.executeTask(ctx, item, job)
+		cancel() // ensure job context is done even if executeTask returned early
+
+		next, ok := b.finishRun(item.threadID)
+		if !ok {
+			return
+		}
+		nextCtx, nextCancel := context.WithCancel(context.Background())
+		nextJob := &runJob{cancel: nextCancel, start: time.Now(), project: next.proj.Name}
+		b.replaceJob(next.threadID, nextJob)
+		log.Printf("task: draining queue thread=%s nextMsg=%s remaining=%d",
+			next.threadID, next.m.ID, b.queueLen(next.threadID))
+		if _, sendErr := next.s.ChannelMessageSend(next.threadID, "Starting queued follow-up…"); sendErr != nil {
+			log.Printf("error: reply queue-start: %v", sendErr)
+		}
+		item = next
+		job = nextJob
+		ctx = nextCtx
+		cancel = nextCancel
+	}
+}
+
+// executeTask runs one Grok task that already holds the thread claim.
+func (b *Bot) executeTask(ctx context.Context, item taskItem, job *runJob) {
+	s, m, parsed, proj, threadID := item.s, item.m, item.parsed, item.proj, item.threadID
 
 	status, err := s.ChannelMessageSend(threadID, workingStatus(proj.Name, 0, ""))
 	if err != nil {
@@ -440,15 +619,34 @@ func (b *Bot) handleTask(s *discordgo.Session, m *discordgo.MessageCreate, parse
 	}
 
 	prompt := parsed.Prompt
-	if len(m.Attachments) > 0 {
+
+	// Include the Discord reply target (text + files) when the user tags Grok
+	// in a follow-up message, e.g. post an image then reply "@Grok what is this?".
+	var related *discordgo.Message
+	if hasMessageReference(m) {
+		refMsg, refErr := resolveReferencedMessage(s, m)
+		if refErr != nil {
+			log.Printf("warn: referenced message: %v", refErr)
+		} else if refMsg != nil {
+			related = refMsg
+			prompt = promptWithReferenced(prompt, related)
+			log.Printf("task: included referenced message id=%s attachments=%d contentLen=%d",
+				related.ID, len(related.Attachments), len(related.Content))
+		} else {
+			log.Printf("warn: referenced message %s missing or deleted", m.MessageReference.MessageID)
+		}
+	}
+
+	attachments := collectAttachments(m.Attachments, related)
+	if len(attachments) > 0 {
 		attDir := filepath.Join(b.cfg.DataDir, "attachments", m.ID)
 		defer func() {
 			if rmErr := os.RemoveAll(attDir); rmErr != nil {
 				log.Printf("warn: cleanup attachments %s: %v", attDir, rmErr)
 			}
 		}()
-		log.Printf("task: downloading %d attachment(s) → %s", len(m.Attachments), attDir)
-		files, dlErr := downloadAttachments(ctx, m.Attachments, attDir)
+		log.Printf("task: downloading %d attachment(s) → %s", len(attachments), attDir)
+		files, dlErr := downloadAttachments(ctx, attachments, attDir)
 		if dlErr != nil {
 			close(stopProgress)
 			progressWG.Wait()
@@ -463,9 +661,7 @@ func (b *Bot) handleTask(s *discordgo.Session, m *discordgo.MessageCreate, parse
 		prompt = promptWithAttachments(prompt, files)
 		log.Printf("task: saved %d attachment(s)", len(files))
 	}
-	if prefix := worktreePromptPrefix(wtBranch); prefix != "" {
-		prompt = prefix + prompt
-	}
+	prompt = remoteWorkPromptPrefix(wtBranch) + prompt
 
 	var sessionID string
 	if e, ok := b.sessions.Get(threadID); ok {
@@ -499,13 +695,14 @@ func (b *Bot) handleTask(s *discordgo.Session, m *discordgo.MessageCreate, parse
 	progressWG.Wait()
 
 	elapsed := time.Since(job.start)
-	log.Printf("task: grok done elapsed=%s code=%d cancelled=%v session=%s textLen=%d stderrLen=%d text=%q",
+	log.Printf("task: grok done elapsed=%s code=%d cancelled=%v session=%s textLen=%d stderrLen=%d ctx=%s text=%q",
 		elapsed.Round(time.Millisecond),
 		result.Code,
 		result.Cancelled,
 		result.SessionID,
 		len(result.Text),
 		len(result.Stderr),
+		result.ContextSummary(),
 		truncate(result.Text, 400),
 	)
 	if result.Stderr != "" {
@@ -544,6 +741,12 @@ func (b *Bot) handleTask(s *discordgo.Session, m *discordgo.MessageCreate, parse
 	}
 	if wtBranch != "" {
 		header += " · worktree"
+	}
+	if n := b.queueLen(threadID); n > 0 {
+		header += fmt.Sprintf(" · %d queued", n)
+	}
+	if ctxSum := result.ContextSummary(); ctxSum != "" {
+		header += " · ctx " + ctxSum
 	}
 	if _, err := s.ChannelMessageEdit(threadID, status.ID, header); err != nil {
 		log.Printf("error: edit status: %v", err)

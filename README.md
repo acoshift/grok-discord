@@ -109,17 +109,23 @@ Project is chosen **only** from `channels` config (parent channel when inside a 
 |---------|--------|
 | `@Grok <task>` | Run against this channel’s project |
 | `@Grok <follow-up>` in thread | Resume session (same project) |
+| `@Grok <follow-up>` while busy | Queue the follow-up (up to 5); runs after the current task |
 | `@Grok /projects` | Show this channel’s mapped project |
 | `@Grok /reset` | Drop session + remove this thread’s git worktree |
-| `@Grok /status` | Show project, session, and worktree branch |
-| `@Grok /cancel` | Stop the in-progress run in this thread |
+| `@Grok /status` | Show project, session, worktree branch, and queue depth |
+| `@Grok /cancel` | Stop the in-progress run (queued follow-ups still run) |
 | `@Grok <task>` + attachments | Download files for Grok to read (logs, screenshots, patches) |
+| Reply to a message with `@Grok <task>` | Include the referenced message text + attachments (e.g. image, then ask Grok) |
 
-While a task is running, the bot updates the status message every ~15s with elapsed time (and a short thought snippet when available). Assistant text streams into the thread via Grok’s `streaming-json` output (edited about every 1.5s). Use `/cancel` (or `/stop`) in that thread to kill the Grok process.
+While a task is running, the bot updates the status message every ~15s with elapsed time (and a short thought snippet when available). Assistant text streams into the thread via Grok’s `streaming-json` output (edited about every 1.5s). Use `/cancel` (or `/stop`) in that thread to kill the Grok process. Follow-ups sent while a run is active are queued in order (max 5) and start automatically when the current run finishes; the bot replies with `Queued (#N)`.
 
 **Worktrees:** when `worktreeIsolation` is on (default) and the project is a git repo, each Discord thread gets its own worktree at `data/worktrees/<project>/<threadId>` on branch `grok/discord/<threadId>`, created from the main checkout’s `HEAD`. Grok runs with `--cwd` set to that worktree so concurrent threads do not share a working tree. `/reset` removes the worktree and deletes the branch. Set `"worktreeIsolation": false` to always use the main project path.
 
+**Pull requests:** Discord runs are remote, so Grok is instructed to never leave changes as local-only commits. When it makes code changes it should commit on the thread branch (or a feature branch), `git push`, and open/update a PR with `gh pr create`, then include the PR URL in the reply. Requires `gh` auth on the host (`gh auth login` or `GH_TOKEN`) and push access to the project remotes.
+
 **Attachments:** files on the `@Grok` message are downloaded under `data/attachments/<messageId>/`, absolute paths are added to the prompt, and the directory is deleted when the run finishes. Limits: 10 files, 25 MiB each, 50 MiB total. A mention with only attachments (no text) still starts a task.
+
+**Replies:** if you **reply** to another Discord message when tagging Grok (e.g. someone posts a screenshot, then you reply `@Grok what's wrong?`), the bot includes that referenced message’s text and downloads its attachments as well. A bare `@Grok` reply (no extra text) still starts a review task.
 
 ## Security
 
