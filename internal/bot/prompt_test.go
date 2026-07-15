@@ -82,6 +82,54 @@ func TestSanitizeDiscordContentKeepsHashAndQuery(t *testing.T) {
 	}
 }
 
+func TestUnwrapAndExtractURLs(t *testing.T) {
+	in := "check <https://backoffice.example.com/report/player?prefix=home1&providers=imagine&from=2026-07-15&to=2026-07-15&tz=7> please"
+	got := unwrapDiscordLinks(in)
+	if strings.Contains(got, "<https") {
+		t.Fatalf("still wrapped: %q", got)
+	}
+	urls := extractURLs(in)
+	if len(urls) != 1 {
+		t.Fatalf("urls=%v", urls)
+	}
+	if !strings.Contains(urls[0], "prefix=home1") || !strings.Contains(urls[0], "tz=7") {
+		t.Fatalf("query lost: %q", urls[0])
+	}
+	if !strings.Contains(urls[0], "https://backoffice.example.com/report/player?") {
+		t.Fatalf("host/path lost: %q", urls[0])
+	}
+}
+
+func TestEnrichPromptWithLinksBareURL(t *testing.T) {
+	u := "https://ex.com/a?x=1&y=2#frag"
+	got := enrichPromptWithLinks(u)
+	if !strings.Contains(got, u) {
+		t.Fatalf("missing url: %q", got)
+	}
+	if !strings.Contains(got, "analyze this link") && !strings.Contains(strings.ToLower(got), "url") {
+		t.Fatalf("expected link guidance: %q", got)
+	}
+	// Angle-bracket form from Discord clients
+	got = enrichPromptWithLinks("<" + u + ">")
+	if strings.Contains(got, "<https") {
+		t.Fatalf("should unwrap: %q", got)
+	}
+	if !strings.Contains(got, "x=1&y=2") {
+		t.Fatalf("query lost: %q", got)
+	}
+}
+
+func TestParseMessageAngleBracketLink(t *testing.T) {
+	p := ParseMessage("<@123> see <https://ex.com/path?a=1&b=2#x>", "123")
+	if p.Kind != KindTask {
+		t.Fatalf("kind=%v", p.Kind)
+	}
+	// ParseMessage path uses message content before enrich; unwrap happens in messagePromptText/enrich.
+	if !strings.Contains(p.Prompt, "https://ex.com/path?a=1&b=2") && !strings.Contains(p.Prompt, "<https://ex.com/path?a=1&b=2") {
+		t.Fatalf("prompt=%q", p.Prompt)
+	}
+}
+
 func TestFormatElapsed(t *testing.T) {
 	cases := []struct {
 		d    time.Duration

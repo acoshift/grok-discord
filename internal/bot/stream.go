@@ -31,7 +31,7 @@ type discordMessenger struct {
 }
 
 func (m discordMessenger) Send(channelID, content string) (string, error) {
-	msg, err := m.s.ChannelMessageSend(channelID, sanitizeDiscordContent(content))
+	msg, err := discordSend(m.s, channelID, content)
 	if err != nil {
 		return "", err
 	}
@@ -39,8 +39,7 @@ func (m discordMessenger) Send(channelID, content string) (string, error) {
 }
 
 func (m discordMessenger) Edit(channelID, msgID, content string) error {
-	_, err := m.s.ChannelMessageEdit(channelID, msgID, sanitizeDiscordContent(content))
-	return err
+	return discordEdit(m.s, channelID, msgID, content)
 }
 
 func (m discordMessenger) Typing(channelID string) error {

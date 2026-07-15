@@ -658,6 +658,11 @@ func (b *Bot) executeTask(ctx context.Context, item taskItem, job *runJob) {
 		prompt = promptWithAttachments(prompt, files)
 		log.Printf("task: saved %d attachment(s)", len(files))
 	}
+	// Normalize Discord link markup and keep query/# fragments explicit for the model.
+	prompt = enrichPromptWithLinks(prompt)
+	if urls := extractURLs(prompt); len(urls) > 0 {
+		log.Printf("task: urls=%v", urls)
+	}
 	prompt = remoteWorkPromptPrefix(wtBranch) + prompt
 
 	var sessionID string
@@ -954,16 +959,16 @@ func sendChunks(s *discordgo.Session, channelID, text string) {
 	parts := splitMessage(text)
 	log.Printf("reply: channel=%s parts=%d totalLen=%d", channelID, len(parts), len(text))
 	for i, p := range parts {
-		content := sanitizeDiscordContent(p)
+		content := p
 		if len(parts) > 1 {
-			content = sanitizeDiscordContent(fmt.Sprintf("(%d/%d)\n%s", i+1, len(parts), p))
+			content = fmt.Sprintf("(%d/%d)\n%s", i+1, len(parts), p)
 		}
-		if _, err := s.ChannelMessageSend(channelID, content); err != nil {
+		if _, err := discordSend(s, channelID, content); err != nil {
 			log.Printf("error: send chunk %d/%d channel=%s: %v", i+1, len(parts), channelID, err)
 			// Surface a short error so the thread is not left silent.
-			if _, err2 := s.ChannelMessageSend(channelID, sanitizeDiscordContent(
+			if _, err2 := discordSend(s, channelID,
 				fmt.Sprintf("Failed to post reply chunk %d/%d: %v", i+1, len(parts), err),
-			)); err2 != nil {
+			); err2 != nil {
 				log.Printf("error: send failure notice: %v", err2)
 			}
 		}

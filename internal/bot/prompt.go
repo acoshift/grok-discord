@@ -88,7 +88,8 @@ func messagePromptText(m *discordgo.Message) string {
 	}
 	var parts []string
 	if c := strings.TrimSpace(m.Content); c != "" {
-		parts = append(parts, c)
+		// Discord clients often wrap paste-links as <https://...> to suppress embeds.
+		parts = append(parts, unwrapDiscordLinks(c))
 	}
 	for _, e := range m.Embeds {
 		if e == nil {
@@ -101,7 +102,7 @@ func messagePromptText(m *discordgo.Message) string {
 			parts = append(parts, t)
 		}
 		if d := strings.TrimSpace(e.Description); d != "" {
-			parts = append(parts, d)
+			parts = append(parts, unwrapDiscordLinks(d))
 		}
 	}
 	return normalizeUserPrompt(strings.Join(parts, "\n"))
