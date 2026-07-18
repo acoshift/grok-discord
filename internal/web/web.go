@@ -7,6 +7,8 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/moonrhythm/hime"
@@ -47,6 +49,9 @@ func New(cfg *config.Config, sessions *sessionstore.Store, hist *history.Store, 
 		"dashboard":            "/",
 		"history":              "/history",
 		"history.thread":       "/history/",
+		"worktrees":            "/worktrees",
+		"worktrees.prune":      "/worktrees/prune",
+		"worktrees.pruneIdle":  "/worktrees/prune-idle",
 		"config":               "/config",
 		"config.addProject":    "/config/projects",
 		"config.removeProject": "/config/projects/remove",
@@ -56,6 +61,7 @@ func New(cfg *config.Config, sessions *sessionstore.Store, hist *history.Store, 
 		"config.removeRole":    "/config/roles/remove",
 		"config.addChannel":    "/config/channels",
 		"config.removeChannel": "/config/channels/remove",
+		"config.settings":      "/config/settings",
 		"sse":                  "/events",
 	})
 
@@ -68,12 +74,16 @@ func New(cfg *config.Config, sessions *sessionstore.Store, hist *history.Store, 
 	tp.ParseFiles("dashboard", "layout.tmpl", "dashboard.tmpl")
 	tp.ParseFiles("history", "layout.tmpl", "history.tmpl")
 	tp.ParseFiles("history_detail", "layout.tmpl", "history_detail.tmpl")
+	tp.ParseFiles("worktrees", "layout.tmpl", "worktrees.tmpl")
 	tp.ParseFiles("config", "layout.tmpl", "config.tmpl")
 
 	mux := http.NewServeMux()
 	mux.Handle("GET /{$}", hime.Handler(s.dashboard))
 	mux.Handle("GET /history", hime.Handler(s.historyList))
 	mux.Handle("GET /history/{threadID}", hime.Handler(s.historyDetail))
+	mux.Handle("GET /worktrees", hime.Handler(s.worktreesPage))
+	mux.Handle("POST /worktrees/prune", hime.Handler(s.pruneWorktree))
+	mux.Handle("POST /worktrees/prune-idle", hime.Handler(s.pruneIdleWorktrees))
 	mux.Handle("GET /config", hime.Handler(s.configPage))
 	mux.Handle("POST /config/projects", hime.Handler(s.addProject))
 	mux.Handle("POST /config/projects/remove", hime.Handler(s.removeProject))
@@ -83,6 +93,7 @@ func New(cfg *config.Config, sessions *sessionstore.Store, hist *history.Store, 
 	mux.Handle("POST /config/roles/remove", hime.Handler(s.removeRole))
 	mux.Handle("POST /config/channels", hime.Handler(s.addChannel))
 	mux.Handle("POST /config/channels/remove", hime.Handler(s.removeChannel))
+	mux.Handle("POST /config/settings", hime.Handler(s.updateSettings))
 	mux.Handle("GET /events", http.HandlerFunc(s.sse))
 
 	app.Handler(mux)
@@ -110,12 +121,15 @@ type pageData struct {
 	Title       string
 	IsDashboard bool
 	IsHistory   bool
+	IsWorktrees bool
 	IsConfig    bool
 	Flash       string
 	Error       string
 	Status      bot.StatusSnapshot
 	Threads     []history.Summary
 	Thread      history.Thread
+	Worktrees   []bot.WorktreeInfo
+	IdleTTLDays int
 	Config      config.Snapshot
 	SSEPath     string
 }
@@ -176,6 +190,41 @@ func (s *Server) configPage(ctx *hime.Context) error {
 	})
 }
 
+func (s *Server) worktreesPage(ctx *hime.Context) error {
+	return ctx.View("worktrees", pageData{
+		Title:       "Worktrees",
+		IsWorktrees: true,
+		Worktrees:   s.bot.ListWorktrees(),
+		IdleTTLDays: s.cfg.WorktreeIdleTTLDaysValue(),
+		Flash:       ctx.FormValue("ok"),
+		Error:       ctx.FormValue("err"),
+	})
+}
+
+func (s *Server) worktreesRedirect(ctx *hime.Context, okMsg string, err error) error {
+	if err != nil {
+		return ctx.Redirect(ctx.Route("worktrees") + "?err=" + url.QueryEscape(err.Error()))
+	}
+	return ctx.Redirect(ctx.Route("worktrees") + "?ok=" + url.QueryEscape(okMsg))
+}
+
+func (s *Server) pruneWorktree(ctx *hime.Context) error {
+	threadID := ctx.PostFormValue("threadId")
+	err := s.bot.PruneWorktree(threadID)
+	if err != nil {
+		return s.worktreesRedirect(ctx, "", err)
+	}
+	return s.worktreesRedirect(ctx, fmt.Sprintf("Pruned worktree for thread %s", threadID), nil)
+}
+
+func (s *Server) pruneIdleWorktrees(ctx *hime.Context) error {
+	n, err := s.bot.PruneIdleNow()
+	if err != nil {
+		return s.worktreesRedirect(ctx, "", err)
+	}
+	return s.worktreesRedirect(ctx, fmt.Sprintf("Pruned %d idle worktree(s)", n), nil)
+}
+
 func (s *Server) configRedirect(ctx *hime.Context, okMsg string, err error) error {
 	if err != nil {
 		return ctx.Redirect(ctx.Route("config") + "?err=" + url.QueryEscape(err.Error()))
@@ -223,6 +272,25 @@ func (s *Server) addChannel(ctx *hime.Context) error {
 func (s *Server) removeChannel(ctx *hime.Context) error {
 	channelID := ctx.PostFormValue("channelId")
 	return s.configRedirect(ctx, fmt.Sprintf("Removed channel %s", channelID), s.cfg.RemoveChannel(channelID))
+}
+
+func (s *Server) updateSettings(ctx *hime.Context) error {
+	raw := strings.TrimSpace(ctx.PostFormValue("worktreeIdleTTLDays"))
+	if raw == "" {
+		return s.configRedirect(ctx, "", fmt.Errorf("worktreeIdleTTLDays is required"))
+	}
+	days, err := strconv.Atoi(raw)
+	if err != nil {
+		return s.configRedirect(ctx, "", fmt.Errorf("worktreeIdleTTLDays must be an integer"))
+	}
+	if err := s.cfg.SetWorktreeIdleTTLDays(days); err != nil {
+		return s.configRedirect(ctx, "", err)
+	}
+	msg := fmt.Sprintf("Worktree idle TTL set to %d day(s)", days)
+	if days == 0 {
+		msg = "Worktree idle cleanup disabled"
+	}
+	return s.configRedirect(ctx, msg, nil)
 }
 
 // mergeSessionRows adds session-store threads that have no history turns yet.

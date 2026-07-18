@@ -8,27 +8,34 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 )
 
-const defaultHTTPListen = ":8787"
+const (
+	defaultHTTPListen          = ":8787"
+	DefaultWorktreeIdleTTLDays = 30
+)
 
 type Config struct {
 	DiscordToken string `json:"discordToken"`
 	// DiscordClientID is optional; when empty the client id is decoded from discordToken.
-	DiscordClientID string            `json:"discordClientId,omitempty"`
-	AllowedUserIDs  []string          `json:"allowedUserIds"`
-	AllowedRoleIDs  []string          `json:"allowedRoleIds"`
-	Projects        map[string]string `json:"projects"`
-	Channels        map[string]string `json:"channels"` // channel ID → project name
-	GrokBin         string            `json:"grokBin"`
-	Yolo            *bool             `json:"yolo"`
-	Model           string            `json:"model"`
-	MaxTurns        int               `json:"maxTurns"`
-	TimeoutMs       int               `json:"timeoutMs"`
-	ExtraArgs            []string `json:"extraArgs"`
-	SummarizeThreadTitle *bool    `json:"summarizeThreadTitle"`
-	SummarizeTimeoutMs   int      `json:"summarizeTimeoutMs"`
-	WorktreeIsolation    *bool    `json:"worktreeIsolation"`
+	DiscordClientID      string            `json:"discordClientId,omitempty"`
+	AllowedUserIDs       []string          `json:"allowedUserIds"`
+	AllowedRoleIDs       []string          `json:"allowedRoleIds"`
+	Projects             map[string]string `json:"projects"`
+	Channels             map[string]string `json:"channels"` // channel ID → project name
+	GrokBin              string            `json:"grokBin"`
+	Yolo                 *bool             `json:"yolo"`
+	Model                string            `json:"model"`
+	MaxTurns             int               `json:"maxTurns"`
+	TimeoutMs            int               `json:"timeoutMs"`
+	ExtraArgs            []string          `json:"extraArgs"`
+	SummarizeThreadTitle *bool             `json:"summarizeThreadTitle"`
+	SummarizeTimeoutMs   int               `json:"summarizeTimeoutMs"`
+	WorktreeIsolation    *bool             `json:"worktreeIsolation"`
+	// WorktreeIdleTTLDays is days of inactivity before pruning thread worktrees.
+	// nil/omitted → DefaultWorktreeIdleTTLDays (30). 0 disables idle cleanup.
+	WorktreeIdleTTLDays *int `json:"worktreeIdleTTLDays,omitempty"`
 	// HTTPListen is the address for the private-network web UI (e.g. ":8787", "0.0.0.0:8787").
 	// Empty uses default ":8787". Override with GROK_DISCORD_HTTP_LISTEN.
 	HTTPListen string `json:"httpListen,omitempty"`
@@ -54,21 +61,22 @@ type ChannelItem struct {
 
 // Snapshot is a read-only copy of config fields used by the web UI.
 type Snapshot struct {
-	Projects          []ProjectItem
-	Channels          []ChannelItem
-	ProjectNames      []string
-	AllowedUserIDs    []string
-	AllowedRoleIDs    []string
-	HTTPListen        string
-	GrokBin           string
-	Model             string
-	MaxTurns          int
-	Yolo              bool
-	WorktreeIsolation bool
-	ClientID          string
-	InviteURL         string
-	InviteError       string
-	InvitePermissions int64
+	Projects            []ProjectItem
+	Channels            []ChannelItem
+	ProjectNames        []string
+	AllowedUserIDs      []string
+	AllowedRoleIDs      []string
+	HTTPListen          string
+	GrokBin             string
+	Model               string
+	MaxTurns            int
+	Yolo                bool
+	WorktreeIsolation   bool
+	WorktreeIdleTTLDays int // effective value (default 30 when unset)
+	ClientID            string
+	InviteURL           string
+	InviteError         string
+	InvitePermissions   int64
 }
 
 func (c *Config) YoloEnabled() bool {
@@ -90,6 +98,26 @@ func (c *Config) WorktreeIsolationEnabled() bool {
 		return true
 	}
 	return *c.WorktreeIsolation
+}
+
+// WorktreeIdleTTLDaysValue returns the configured idle TTL in days.
+// Omitted config uses DefaultWorktreeIdleTTLDays; 0 means cleanup is disabled.
+func (c *Config) WorktreeIdleTTLDaysValue() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.WorktreeIdleTTLDays == nil {
+		return DefaultWorktreeIdleTTLDays
+	}
+	return *c.WorktreeIdleTTLDays
+}
+
+// WorktreeIdleTTL returns the idle prune duration, or 0 when cleanup is disabled.
+func (c *Config) WorktreeIdleTTL() time.Duration {
+	days := c.WorktreeIdleTTLDaysValue()
+	if days <= 0 {
+		return 0
+	}
+	return time.Duration(days) * 24 * time.Hour
 }
 
 // ListenAddr returns the HTTP bind address (env overrides config).
@@ -212,6 +240,7 @@ func (c *Config) saveLocked() error {
 		SummarizeThreadTitle *bool             `json:"summarizeThreadTitle"`
 		SummarizeTimeoutMs   int               `json:"summarizeTimeoutMs"`
 		WorktreeIsolation    *bool             `json:"worktreeIsolation"`
+		WorktreeIdleTTLDays  *int              `json:"worktreeIdleTTLDays,omitempty"`
 		HTTPListen           string            `json:"httpListen,omitempty"`
 	}{
 		DiscordToken:         c.DiscordToken,
@@ -229,6 +258,7 @@ func (c *Config) saveLocked() error {
 		SummarizeThreadTitle: c.SummarizeThreadTitle,
 		SummarizeTimeoutMs:   c.SummarizeTimeoutMs,
 		WorktreeIsolation:    c.WorktreeIsolation,
+		WorktreeIdleTTLDays:  cloneIntPtr(c.WorktreeIdleTTLDays),
 		HTTPListen:           c.HTTPListen,
 	}
 	raw, err := json.MarshalIndent(out, "", "  ")
@@ -237,6 +267,19 @@ func (c *Config) saveLocked() error {
 	}
 	raw = append(raw, '\n')
 	return os.WriteFile(c.ConfigPath, raw, 0o600)
+}
+
+// SetWorktreeIdleTTLDays sets days of inactivity before worktree prune and persists.
+// 0 disables automatic idle cleanup. Negative values are rejected.
+func (c *Config) SetWorktreeIdleTTLDays(days int) error {
+	if days < 0 {
+		return fmt.Errorf("worktreeIdleTTLDays must be >= 0 (0 disables cleanup)")
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	d := days
+	c.WorktreeIdleTTLDays = &d
+	return c.saveLocked()
 }
 
 // AddProject registers a project folder (name → absolute path) and persists.
@@ -433,19 +476,24 @@ func (c *Config) Snapshot() Snapshot {
 		channels = append(channels, ChannelItem{ChannelID: id, Project: c.Channels[id]})
 	}
 
+	idleDays := DefaultWorktreeIdleTTLDays
+	if c.WorktreeIdleTTLDays != nil {
+		idleDays = *c.WorktreeIdleTTLDays
+	}
 	snap := Snapshot{
-		Projects:          projects,
-		Channels:          channels,
-		ProjectNames:      names,
-		AllowedUserIDs:    slices.Clone(c.AllowedUserIDs),
-		AllowedRoleIDs:    slices.Clone(c.AllowedRoleIDs),
-		HTTPListen:        c.HTTPListen,
-		GrokBin:           c.GrokBin,
-		Model:             c.Model,
-		MaxTurns:          c.MaxTurns,
-		Yolo:              c.YoloEnabled(),
-		WorktreeIsolation: c.WorktreeIsolationEnabled(),
-		InvitePermissions: BotInvitePermissions,
+		Projects:            projects,
+		Channels:            channels,
+		ProjectNames:        names,
+		AllowedUserIDs:      slices.Clone(c.AllowedUserIDs),
+		AllowedRoleIDs:      slices.Clone(c.AllowedRoleIDs),
+		HTTPListen:          c.HTTPListen,
+		GrokBin:             c.GrokBin,
+		Model:               c.Model,
+		MaxTurns:            c.MaxTurns,
+		Yolo:                c.YoloEnabled(),
+		WorktreeIsolation:   c.WorktreeIsolationEnabled(),
+		WorktreeIdleTTLDays: idleDays,
+		InvitePermissions:   BotInvitePermissions,
 	}
 	// ClientID/InviteURL may read DiscordClientID/DiscordToken; unlock first.
 	// Snapshot already holds RLock — resolve invite without re-locking via local fields.
@@ -541,6 +589,14 @@ func cloneStringMap(m map[string]string) map[string]string {
 		out[k] = v
 	}
 	return out
+}
+
+func cloneIntPtr(p *int) *int {
+	if p == nil {
+		return nil
+	}
+	v := *p
+	return &v
 }
 
 func removeString(ss []string, want string) []string {

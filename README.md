@@ -47,6 +47,7 @@ cp config.example.json config.json
 | `summarizeThreadTitle` | Call Grok once to name the Discord thread before work (default true) |
 | `summarizeTimeoutMs` | Timeout for the title summary call (default 45000) |
 | `worktreeIsolation` | Per-thread git worktree under `data/worktrees/` (default true; non-git projects use main cwd) |
+| `worktreeIdleTTLDays` | Days of inactivity before pruning idle worktrees (default `30`; `0` disables). Editable on the Config page |
 | `httpListen` | Private-network web UI bind address (default `:8787`; override with `GROK_DISCORD_HTTP_LISTEN`) |
 
 `config.json` is gitignored. Never commit tokens, user IDs, or private project paths.
@@ -59,6 +60,7 @@ While the process runs it also serves a small server-rendered admin UI (hime + `
 |------|------|
 | `/` | Dashboard — live active runs / session counts (SSE refresh) |
 | `/history` | Thread list; open a thread to read each user/Grok turn |
+| `/worktrees` | List per-thread git worktrees; prune one or all past idle TTL |
 | `/config` | Add/remove projects, channel→project map, allowed users, and roles |
 
 Bind for Tailscale or LAN with `"httpListen": "0.0.0.0:8787"` (or a Tailscale IP). There is **no auth** on this UI — only expose it on a private network or VPN.
@@ -133,7 +135,7 @@ Project is chosen **only** from `channels` config (parent channel when inside a 
 
 While a task is running, the bot updates the status message every few seconds with elapsed time (and a short thought/tool activity snippet when available). Assistant text streams into the thread via Grok’s `streaming-json` output: a live message shows the **latest** text (tail window), Discord edits run asynchronously so they never block reading Grok’s stdout, and when a reply outgrows one Discord message the bot seals that message and continues in a new one (finish does not re-post sealed chunks). Typing is pulsed while streaming. Use `/cancel` (or `/stop`) in that thread to kill the Grok process (the live stream is finalized without a stuck “streaming…” footer). Follow-ups sent while a run is active are queued in order (max 5) and start automatically when the current run finishes; the bot replies with `Queued (#N)`.
 
-**Worktrees:** when `worktreeIsolation` is on (default) and the project is a git repo, each Discord thread gets its own worktree at `data/worktrees/<project>/<threadId>` on branch `grok/discord/<threadId>`, created from the main checkout’s `HEAD`. Grok runs with `--cwd` set to that worktree so concurrent threads do not share a working tree. `/reset` removes the worktree and deletes the branch. If the branch’s PR is already **merged** or **closed**, the next task in that thread automatically removes the worktree/branch (and session) and starts a fresh worktree from `HEAD`. Set `"worktreeIsolation": false` to always use the main project path.
+**Worktrees:** when `worktreeIsolation` is on (default) and the project is a git repo, each Discord thread gets its own worktree at `data/worktrees/<project>/<threadId>` on branch `grok/discord/<threadId>`, created from the main checkout’s `HEAD`. Grok runs with `--cwd` set to that worktree so concurrent threads do not share a working tree. `/reset` removes the worktree and deletes the branch. If the branch’s PR is already **merged** or **closed**, the next task in that thread automatically removes the worktree/branch (and session) and starts a fresh worktree from `HEAD`. Idle worktrees are also pruned after **`worktreeIdleTTLDays`** days without activity (default 30; session `updatedAt`, or directory mtime for orphans). Set to `0` to disable. A background sweep runs daily and skips threads that are currently running or queued. Set `"worktreeIsolation": false` to always use the main project path.
 
 **Pull requests:** Discord runs are remote, so Grok is instructed to never leave changes as local-only commits. When it makes code changes it should commit on the thread branch (or a feature branch), `git push`, and open/update a PR with `gh pr create`, then include the PR URL in the reply. Requires `gh` auth on the host (`gh auth login` or `GH_TOKEN`) and push access to the project remotes.
 

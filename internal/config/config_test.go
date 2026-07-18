@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestAddProjectUserRolePersistAndRuntime(t *testing.T) {
@@ -205,6 +206,52 @@ func TestListenAddrEnvOverride(t *testing.T) {
 	t.Setenv("GROK_DISCORD_HTTP_LISTEN", "0.0.0.0:9999")
 	if got := cfg.ListenAddr(); got != "0.0.0.0:9999" {
 		t.Fatalf("ListenAddr = %q", got)
+	}
+}
+
+func TestWorktreeIdleTTLDays(t *testing.T) {
+	cfg := &Config{
+		Projects:   map[string]string{},
+		Channels:   map[string]string{},
+		ConfigPath: filepath.Join(t.TempDir(), "config.json"),
+	}
+	if cfg.WorktreeIdleTTLDaysValue() != DefaultWorktreeIdleTTLDays {
+		t.Fatalf("default days=%d", cfg.WorktreeIdleTTLDaysValue())
+	}
+	if cfg.WorktreeIdleTTL() != time.Duration(DefaultWorktreeIdleTTLDays)*24*time.Hour {
+		t.Fatalf("default ttl=%v", cfg.WorktreeIdleTTL())
+	}
+	if err := cfg.SetWorktreeIdleTTLDays(7); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.WorktreeIdleTTLDaysValue() != 7 {
+		t.Fatalf("days=%d", cfg.WorktreeIdleTTLDaysValue())
+	}
+	if cfg.Snapshot().WorktreeIdleTTLDays != 7 {
+		t.Fatalf("snapshot days=%d", cfg.Snapshot().WorktreeIdleTTLDays)
+	}
+	if err := cfg.SetWorktreeIdleTTLDays(0); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.WorktreeIdleTTL() != 0 {
+		t.Fatal("0 should disable")
+	}
+	if err := cfg.SetWorktreeIdleTTLDays(-1); err == nil {
+		t.Fatal("expected error for negative")
+	}
+
+	disk, err := os.ReadFile(cfg.ConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parsed struct {
+		WorktreeIdleTTLDays *int `json:"worktreeIdleTTLDays"`
+	}
+	if err := json.Unmarshal(disk, &parsed); err != nil {
+		t.Fatal(err)
+	}
+	if parsed.WorktreeIdleTTLDays == nil || *parsed.WorktreeIdleTTLDays != 0 {
+		t.Fatalf("disk ttl=%v", parsed.WorktreeIdleTTLDays)
 	}
 }
 

@@ -208,6 +208,7 @@ func (b *Bot) onReady(s *discordgo.Session, r *discordgo.Ready) {
 		log.Printf("ready: channel %s → %s", ch.ChannelID, ch.Project)
 	}
 	_ = s.UpdateGameStatus(0, "@Grok <task>")
+	b.startIdleWorktreeCleanup()
 }
 
 func (b *Bot) onMessage(s *discordgo.Session, m *discordgo.MessageCreate) {

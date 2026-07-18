@@ -14,6 +14,7 @@ Feature backlog for grok-discord. Order is suggested priority, not a commitment.
 - [x] Per-thread git worktree isolation (`data/worktrees/`, `/reset` cleanup)
 - [x] Stream Grok output (`streaming-json` → live Discord message edits)
 - [x] Queue follow-ups when a thread is busy (instead of reject)
+- [x] Idle worktree TTL cleanup (`worktreeIdleTTLDays`, default 30; daily sweep; config page)
 
 ## Next
 
@@ -23,10 +24,6 @@ Replace (or complement) mention + text parse with application commands.
 
 - Register `/grok`, `/cancel`, `/status`, `/projects`, `/reset`, `/help`
 - Keep mention path for compatibility during migration
-
-### 2. Idle worktree TTL cleanup
-
-Worktrees currently live until `/reset`. Optionally prune after N days of inactivity.
 
 ## Later / nice-to-have
 

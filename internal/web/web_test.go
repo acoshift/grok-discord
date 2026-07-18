@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/acoshift/grok-discord/internal/bot"
 	"github.com/acoshift/grok-discord/internal/config"
+	"github.com/acoshift/grok-discord/internal/gitworktree"
 	"github.com/acoshift/grok-discord/internal/history"
 	"github.com/acoshift/grok-discord/internal/sessionstore"
 )
@@ -87,6 +89,8 @@ func TestPagesRender(t *testing.T) {
 	}{
 		{"/", `id="page-dashboard"`},
 		{"/history", `id="page-history"`},
+		{"/worktrees", `id="page-worktrees"`},
+		{"/worktrees", "Prune idle now"},
 		{"/config", `id="page-config"`},
 		{"/config", `id="bot-invite"`},
 		{"/config", "discord.com/oauth2/authorize"},
@@ -210,10 +214,24 @@ func TestConfigAddsPersist(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 	body := w.Body.String()
-	for _, want := range []string{"added", newProj, "user-added", "role-added", "ch-added", "Remove", "Add channel map"} {
+	for _, want := range []string{"added", newProj, "user-added", "role-added", "ch-added", "Remove", "Add channel map", "Worktree idle cleanup", "worktreeIdleTTLDays"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("config page missing %q", want)
 		}
+	}
+
+	// Settings: idle TTL
+	reqTTL := httptest.NewRequest(http.MethodPost, "/config/settings", strings.NewReader(url.Values{
+		"worktreeIdleTTLDays": {"14"},
+	}.Encode()))
+	reqTTL.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	wTTL := httptest.NewRecorder()
+	h.ServeHTTP(wTTL, reqTTL)
+	if wTTL.Code != http.StatusSeeOther && wTTL.Code != http.StatusFound {
+		t.Fatalf("settings status=%d body=%s", wTTL.Code, wTTL.Body.String())
+	}
+	if cfg.WorktreeIdleTTLDaysValue() != 14 {
+		t.Fatalf("ttl days=%d", cfg.WorktreeIdleTTLDaysValue())
 	}
 
 	// Removes
@@ -287,6 +305,84 @@ func TestConfigAddsPersist(t *testing.T) {
 	}
 	if contains(disk.AllowedUserIDs, "user-added") || contains(disk.AllowedRoleIDs, "role-added") {
 		t.Fatalf("disk still has allowlist: %+v %+v", disk.AllowedUserIDs, disk.AllowedRoleIDs)
+	}
+}
+
+func TestWorktreePruneRoutes(t *testing.T) {
+	srv, cfg, dir := testServer(t)
+	h := srv.Handler()
+
+	// Init a real git repo as the project path so prune can run Remove.
+	repo := filepath.Join(dir, "proj")
+	runGit := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=test",
+			"GIT_AUTHOR_EMAIL=test@example.com",
+			"GIT_COMMITTER_NAME=test",
+			"GIT_COMMITTER_EMAIL=test@example.com",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	runGit("init")
+	if err := os.WriteFile(filepath.Join(repo, "README"), []byte("hi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit("add", "README")
+	runGit("commit", "-m", "init")
+
+	threadID := "wt-web-1"
+	tr, err := gitworktree.Ensure(context.Background(), repo, cfg.DataDir, "proj", threadID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.sessions.Set(threadID, sessionstore.Entry{
+		SessionID:      "sw",
+		Project:        "proj",
+		Cwd:            tr.Path,
+		MainCwd:        repo,
+		WorktreeBranch: tr.Branch,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/worktrees", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), threadID) {
+		t.Fatalf("worktrees page missing thread: %s", w.Body.String())
+	}
+
+	form := url.Values{"threadId": {threadID}}
+	req = httptest.NewRequest(http.MethodPost, "/worktrees/prune", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusSeeOther && w.Code != http.StatusFound {
+		t.Fatalf("prune status=%d body=%s", w.Code, w.Body.String())
+	}
+	if _, err := os.Stat(tr.Path); !os.IsNotExist(err) {
+		t.Fatalf("worktree still on disk: %v", err)
+	}
+
+	// Idle prune endpoint (no idle trees is fine).
+	days := 30
+	cfg.WorktreeIdleTTLDays = &days
+	req = httptest.NewRequest(http.MethodPost, "/worktrees/prune-idle", nil)
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusSeeOther && w.Code != http.StatusFound {
+		t.Fatalf("prune-idle status=%d", w.Code)
+	}
+	loc := w.Header().Get("Location")
+	if !strings.Contains(loc, "ok=") {
+		t.Fatalf("location=%q", loc)
 	}
 }
 

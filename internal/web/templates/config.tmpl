@@ -47,6 +47,18 @@
 </div>
 
 <div class="section card">
+  <h2>Worktree idle cleanup</h2>
+  <p class="sub" style="margin-top:0">Prune per-thread git worktrees after this many days without activity. <span class="mono">0</span> disables automatic cleanup. Default is <span class="mono">30</span>.</p>
+  <form class="inline" method="post" action="{{route "config.settings"}}" style="grid-template-columns: 1fr auto;">
+    <div>
+      <label for="worktree-idle-ttl">Idle TTL (days)</label>
+      <input id="worktree-idle-ttl" type="number" name="worktreeIdleTTLDays" min="0" step="1" required value="{{.Config.WorktreeIdleTTLDays}}" autocomplete="off">
+    </div>
+    <button type="submit">Save</button>
+  </form>
+</div>
+
+<div class="section card">
   <h2>Add project folder</h2>
   <form class="inline" method="post" action="{{route "config.addProject"}}">
     <div>

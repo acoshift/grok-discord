@@ -22,5 +22,6 @@
   "summarizeThreadTitle": true,
   "summarizeTimeoutMs": 45000,
   "worktreeIsolation": true,
+  "worktreeIdleTTLDays": 30,
   "httpListen": ":8787"
 }
