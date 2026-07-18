@@ -258,6 +258,14 @@ func ViewByHeadWith(ctx context.Context, run Runner, repoDir, branch string) (In
 	return info, nil
 }
 
+// Check is one CI status row from gh pr checks.
+type Check struct {
+	Name   string
+	State  string
+	Bucket string // pass, fail, pending, skipping, cancel
+	Link   string
+}
+
 // ChecksSummary returns a short pass/fail/pending rollup for the PR.
 func ChecksSummary(ctx context.Context, repoDir string, number int) (string, error) {
 	return ChecksSummaryWith(ctx, defaultRunner, repoDir, number)
@@ -265,42 +273,80 @@ func ChecksSummary(ctx context.Context, repoDir string, number int) (string, err
 
 // ChecksSummaryWith is ChecksSummary with an injectable runner.
 func ChecksSummaryWith(ctx context.Context, run Runner, repoDir string, number int) (string, error) {
+	checks, err := ListChecksWith(ctx, run, repoDir, number)
+	if err != nil {
+		return "", err
+	}
+	return SummarizeChecks(checks), nil
+}
+
+// ListChecks returns all check rows for a PR.
+func ListChecks(ctx context.Context, repoDir string, number int) ([]Check, error) {
+	return ListChecksWith(ctx, defaultRunner, repoDir, number)
+}
+
+// ListChecksWith is ListChecks with an injectable runner.
+func ListChecksWith(ctx context.Context, run Runner, repoDir string, number int) ([]Check, error) {
 	if run == nil {
 		run = defaultRunner
 	}
 	if number <= 0 {
-		return "", fmt.Errorf("invalid PR number")
+		return nil, fmt.Errorf("invalid PR number")
 	}
 	raw, err := run(ctx, repoDir, "gh", "pr", "checks", strconv.Itoa(number),
-		"--json", "name,state,bucket")
+		"--json", "name,state,bucket,link")
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return SummarizeChecksJSON(raw)
+	return ParseChecksJSON(raw)
 }
 
 type checkRow struct {
 	Name   string `json:"name"`
 	State  string `json:"state"`
 	Bucket string `json:"bucket"`
+	Link   string `json:"link"`
+}
+
+// ParseChecksJSON parses gh pr checks --json output.
+func ParseChecksJSON(raw []byte) ([]Check, error) {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || string(raw) == "[]" {
+		return nil, nil
+	}
+	var rows []checkRow
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		return nil, fmt.Errorf("gh pr checks json: %w", err)
+	}
+	out := make([]Check, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, Check{
+			Name:   r.Name,
+			State:  r.State,
+			Bucket: bucketOf(r),
+			Link:   r.Link,
+		})
+	}
+	return out, nil
 }
 
 // SummarizeChecksJSON turns gh pr checks --json into a short rollup string.
 func SummarizeChecksJSON(raw []byte) (string, error) {
-	raw = bytes.TrimSpace(raw)
-	if len(raw) == 0 || string(raw) == "[]" {
-		return "none", nil
+	checks, err := ParseChecksJSON(raw)
+	if err != nil {
+		return "", err
 	}
-	var rows []checkRow
-	if err := json.Unmarshal(raw, &rows); err != nil {
-		return "", fmt.Errorf("gh pr checks json: %w", err)
-	}
-	if len(rows) == 0 {
-		return "none", nil
+	return SummarizeChecks(checks), nil
+}
+
+// SummarizeChecks builds the card rollup (✓ / ✗ / …).
+func SummarizeChecks(checks []Check) string {
+	if len(checks) == 0 {
+		return "none"
 	}
 	var pass, fail, pending, other int
-	for _, r := range rows {
-		switch bucketOf(r) {
+	for _, r := range checks {
+		switch strings.ToLower(r.Bucket) {
 		case "pass":
 			pass++
 		case "fail":
@@ -325,9 +371,150 @@ func SummarizeChecksJSON(raw []byte) (string, error) {
 		parts = append(parts, fmt.Sprintf("· %d", other))
 	}
 	if len(parts) == 0 {
-		return "none", nil
+		return "none"
 	}
-	return strings.Join(parts, " · "), nil
+	return strings.Join(parts, " · ")
+}
+
+// HasFailing reports whether any check is in the fail bucket.
+func HasFailing(checks []Check) bool {
+	for _, c := range checks {
+		if strings.EqualFold(c.Bucket, "fail") {
+			return true
+		}
+	}
+	return false
+}
+
+// FailedChecks returns only failing check rows.
+func FailedChecks(checks []Check) []Check {
+	var out []Check
+	for _, c := range checks {
+		if strings.EqualFold(c.Bucket, "fail") {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// FormatCIDigest builds a Discord CI failure notice (no embeds).
+func FormatCIDigest(prNumber int, headSHA string, failed []Check) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "**CI failed** · PR #%d", prNumber)
+	if headSHA != "" {
+		short := headSHA
+		if len(short) > 7 {
+			short = short[:7]
+		}
+		fmt.Fprintf(&b, " · `%s`", short)
+	}
+	b.WriteByte('\n')
+	if len(failed) == 0 {
+		b.WriteString("One or more checks failed.\n")
+	} else {
+		limit := 8
+		for i, c := range failed {
+			if i >= limit {
+				fmt.Fprintf(&b, "… +%d more\n", len(failed)-limit)
+				break
+			}
+			name := strings.TrimSpace(c.Name)
+			if name == "" {
+				name = "(unnamed check)"
+			}
+			if c.Link != "" {
+				fmt.Fprintf(&b, "• **%s** — %s\n", name, c.Link)
+			} else {
+				fmt.Fprintf(&b, "• **%s**\n", name)
+			}
+		}
+	}
+	b.WriteString("Fix: `@Grok /fix-ci`")
+	return strings.TrimSpace(b.String())
+}
+
+// FailedLogSnippet fetches truncated failed-job logs for a branch (best-effort).
+func FailedLogSnippet(ctx context.Context, repoDir, branch, headSHA string, maxRunes int) string {
+	return FailedLogSnippetWith(ctx, defaultRunner, repoDir, branch, headSHA, maxRunes)
+}
+
+// FailedLogSnippetWith is FailedLogSnippet with an injectable runner.
+func FailedLogSnippetWith(ctx context.Context, run Runner, repoDir, branch, headSHA string, maxRunes int) string {
+	if run == nil {
+		run = defaultRunner
+	}
+	if maxRunes <= 0 {
+		maxRunes = 1500
+	}
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		return ""
+	}
+	raw, err := run(ctx, repoDir, "gh", "run", "list",
+		"--branch", branch,
+		"--limit", "10",
+		"--json", "databaseId,conclusion,headSha,status,name",
+	)
+	if err != nil {
+		return ""
+	}
+	var runs []struct {
+		DatabaseID int64  `json:"databaseId"`
+		Conclusion string `json:"conclusion"`
+		HeadSHA    string `json:"headSha"`
+		Status     string `json:"status"`
+		Name       string `json:"name"`
+	}
+	if err := json.Unmarshal(raw, &runs); err != nil || len(runs) == 0 {
+		return ""
+	}
+	headSHA = strings.TrimSpace(headSHA)
+	shaMatch := func(runSHA string) bool {
+		if headSHA == "" || runSHA == "" {
+			return true
+		}
+		return strings.HasPrefix(runSHA, headSHA) || strings.HasPrefix(headSHA, runSHA) || strings.EqualFold(runSHA, headSHA)
+	}
+	var runID int64
+	for _, r := range runs {
+		if !strings.EqualFold(r.Conclusion, "failure") && !strings.EqualFold(r.Conclusion, "timed_out") {
+			continue
+		}
+		if !shaMatch(r.HeadSHA) {
+			continue
+		}
+		runID = r.DatabaseID
+		break
+	}
+	if runID == 0 {
+		// Fall back to first failed run on the branch.
+		for _, r := range runs {
+			if strings.EqualFold(r.Conclusion, "failure") || strings.EqualFold(r.Conclusion, "timed_out") {
+				runID = r.DatabaseID
+				break
+			}
+		}
+	}
+	if runID == 0 {
+		return ""
+	}
+	logRaw, err := run(ctx, repoDir, "gh", "run", "view", strconv.FormatInt(runID, 10), "--log-failed")
+	if err != nil || len(logRaw) == 0 {
+		return ""
+	}
+	return tailRunes(string(logRaw), maxRunes)
+}
+
+func tailRunes(s string, n int) string {
+	s = strings.TrimSpace(s)
+	if n <= 0 || s == "" {
+		return s
+	}
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return "…\n" + string(r[len(r)-n:])
 }
 
 func bucketOf(r checkRow) string {

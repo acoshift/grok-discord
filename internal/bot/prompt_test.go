@@ -35,6 +35,13 @@ func TestParseMessage(t *testing.T) {
 			t.Fatalf("%q: got %+v want KindCancel", in, p)
 		}
 	}
+
+	for _, in := range []string{"/fix-ci", "fix-ci"} {
+		p = ParseMessage("<@123> "+in, "123")
+		if p.Kind != KindFixCI {
+			t.Fatalf("%q: got %+v want KindFixCI", in, p)
+		}
+	}
 }
 
 func TestParseMessagePreservesSpecialChars(t *testing.T) {

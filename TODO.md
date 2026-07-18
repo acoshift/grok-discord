@@ -21,6 +21,7 @@ Synthesized from multi-agent discussion (2026-07-18): collaboration, PR/CI ship 
 - [x] Idle worktree TTL cleanup (`worktreeIdleTTLDays`, default 30; daily sweep; config page)
 - [x] Thread PR status card (session PR fields, Discord card, `gh` poller, eager cleanup on MERGED/CLOSED, `/status`)
 - [x] Completion summary card (git diff --stat / name-status, risk globs, PR link; after each non-cancelled run)
+- [x] CI fail → triage loop (digest per head SHA, `@Grok /fix-ci`, optional `autoFixCI` + cap)
 
 ## Design principles (team workflow)
 
@@ -53,15 +54,7 @@ Build on existing max-5 FIFO so multi-user follow-ups do not contradict each oth
 - Max pending per user per thread; same-user follow-up **replaces** last queued item
 - Status shows `Running · queue 2 (alice, bob)`
 
-### 3. CI fail → triage loop
-
-Turn the bot from “PR opener” into “PR babysitter.” Builds on the PR status card/poller.
-
-- On checks failure (via status card poller): CI digest (failed jobs + snippet via `gh`)
-- `@Grok /fix-ci` queues a scoped fix task on the thread branch
-- Debounce per head SHA; cap auto-retries; `autoFixCI` default **off**
-
-### 4. Minimum safe team mode (governance baseline)
+### 3. Minimum safe team mode (governance baseline)
 
 Ship before broad eng-VPN rollout (trusted-but-fallible teammates).
 
@@ -135,7 +128,7 @@ Optional complement to mention + text parse — **not** required for team workfl
 | Slice | Includes | Outcome |
 |-------|----------|---------|
 | **A. Multi-person basics** | Ownership, claim/hand-off, queue author/replace | Threads feel intentional; less thrash |
-| **B. PR-aware thread** | ~~PR status card~~ → ~~completion diff card~~ → CI triage | Ship loop stays in Discord |
+| **B. PR-aware thread** | ~~PR status card~~ → ~~completion diff card~~ → ~~CI triage~~ | Ship loop stays in Discord |
 | **C. Safe team mode** | Web auth, audit log, env filter, rate limits, attribution | OK to widen allowlist on shared host |
 | **D. Team artifacts** | Continuity card, labels, `/board`, templates, action buttons | Durable work items + one-tap controls |
 | **E. Review loop** | Issue bind, `/review`, `/comments`+`/address` | Close the inner review cycle |

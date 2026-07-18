@@ -18,6 +18,7 @@ const (
 	KindReset
 	KindStatus
 	KindCancel
+	KindFixCI
 	KindTask
 )
 
@@ -48,6 +49,8 @@ func ParseMessage(content, botUserID string) Parsed {
 		return Parsed{Kind: KindStatus}
 	case "/cancel", "cancel", "/stop", "stop":
 		return Parsed{Kind: KindCancel}
+	case "/fix-ci", "fix-ci", "/fixci", "fixci":
+		return Parsed{Kind: KindFixCI}
 	}
 
 	return Parsed{Kind: KindTask, Prompt: text}
@@ -129,6 +132,7 @@ func HelpText() string {
 		"• `/projects` — show this channel's project",
 		"• `/reset` — forget this thread's session and remove its worktree",
 		"• `/status` — show this thread's session, PR, and queue depth if busy",
+		"• `/fix-ci` — fetch failing CI checks and queue a minimal fix on this PR branch",
 		"• `/cancel` — stop the current run (queued follow-ups still run)",
 		"• `/help` — this message",
 	}, "\n")

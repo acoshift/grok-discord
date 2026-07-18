@@ -12,15 +12,18 @@ import (
 
 func TestPreservePRFields(t *testing.T) {
 	prev := sessionstore.Entry{
-		PRURL:         "https://github.com/o/r/pull/3",
-		PRNumber:      3,
-		PRState:       "OPEN",
-		PRTitle:       "t",
-		PRChecks:      "✓ 1",
-		PRReview:      "APPROVED",
-		PRHeadSHA:     "abc",
-		PRIsDraft:     true,
-		PRStatusMsgID: "msg-1",
+		PRURL:          "https://github.com/o/r/pull/3",
+		PRNumber:       3,
+		PRState:        "OPEN",
+		PRTitle:        "t",
+		PRChecks:       "✓ 1",
+		PRReview:       "APPROVED",
+		PRHeadSHA:      "abc",
+		PRIsDraft:      true,
+		PRStatusMsgID:  "msg-1",
+		CINotifiedSHA:  "abc",
+		CIAutoFixCount: 1,
+		CIAutoFixSHA:   "abc",
 	}
 	next := sessionstore.Entry{
 		SessionID: "s",
@@ -29,6 +32,9 @@ func TestPreservePRFields(t *testing.T) {
 	preservePRFields(&next, prev)
 	if next.PRNumber != 3 || next.PRStatusMsgID != "msg-1" || !next.PRIsDraft {
 		t.Fatalf("next=%+v", next)
+	}
+	if next.CINotifiedSHA != "abc" || next.CIAutoFixCount != 1 || next.CIAutoFixSHA != "abc" {
+		t.Fatalf("ci fields not preserved: %+v", next)
 	}
 	if next.SessionID != "s" {
 		t.Fatalf("clobbered session: %+v", next)

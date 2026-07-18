@@ -43,6 +43,16 @@ func TestSummarizeChecksJSON(t *testing.T) {
 	if err != nil || empty != "none" {
 		t.Fatalf("empty=%q err=%v", empty, err)
 	}
+	checks, err := ParseChecksJSON(raw)
+	if err != nil || !HasFailing(checks) || len(FailedChecks(checks)) != 1 {
+		t.Fatalf("checks=%+v err=%v", checks, err)
+	}
+	digest := FormatCIDigest(42, "abcdef012345", FailedChecks(checks))
+	for _, want := range []string{"CI failed", "#42", "abcdef0", "b", "/fix-ci"} {
+		if !strings.Contains(digest, want) {
+			t.Fatalf("digest missing %q:\n%s", want, digest)
+		}
+	}
 }
 
 func TestFormatCardAndStatus(t *testing.T) {

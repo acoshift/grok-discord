@@ -42,6 +42,11 @@ type Config struct {
 	// RiskyPathGlobs flags completion-card paths for review (**, * globs).
 	// nil/omitted → built-in defaults. Empty slice → no risk highlighting.
 	RiskyPathGlobs []string `json:"riskyPathGlobs,omitempty"`
+	// AutoFixCI queues a CI fix task when the PR status poller sees failing checks.
+	// nil/omitted/false → digest only; user runs @Grok /fix-ci.
+	AutoFixCI *bool `json:"autoFixCI,omitempty"`
+	// AutoFixCIMax is the max auto-queued fix attempts per thread session (default 2).
+	AutoFixCIMax int `json:"autoFixCIMax,omitempty"`
 
 	mu           sync.RWMutex
 	AllowedUsers map[string]struct{} `json:"-"`
@@ -146,6 +151,29 @@ func (c *Config) RiskyPathGlobsEffective() []string {
 		return nil // bot applies DefaultRiskyPathGlobs
 	}
 	return slices.Clone(c.RiskyPathGlobs)
+}
+
+// AutoFixCIEnabled is true only when autoFixCI is explicitly set true.
+func (c *Config) AutoFixCIEnabled() bool {
+	if c == nil {
+		return false
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.AutoFixCI != nil && *c.AutoFixCI
+}
+
+// AutoFixCIMaxAttempts returns the auto-fix cap (default 2, minimum 1 when auto-fix is used).
+func (c *Config) AutoFixCIMaxAttempts() int {
+	if c == nil {
+		return 2
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.AutoFixCIMax <= 0 {
+		return 2
+	}
+	return c.AutoFixCIMax
 }
 
 // ListenAddr returns the HTTP bind address (env overrides config).
@@ -271,6 +299,8 @@ func (c *Config) saveLocked() error {
 		WorktreeIdleTTLDays  *int              `json:"worktreeIdleTTLDays,omitempty"`
 		HTTPListen           string            `json:"httpListen,omitempty"`
 		RiskyPathGlobs       []string          `json:"riskyPathGlobs,omitempty"`
+		AutoFixCI            *bool             `json:"autoFixCI,omitempty"`
+		AutoFixCIMax         int               `json:"autoFixCIMax,omitempty"`
 	}{
 		DiscordToken:         c.DiscordToken,
 		DiscordClientID:      c.DiscordClientID,
@@ -290,6 +320,8 @@ func (c *Config) saveLocked() error {
 		WorktreeIdleTTLDays:  cloneIntPtr(c.WorktreeIdleTTLDays),
 		HTTPListen:           c.HTTPListen,
 		RiskyPathGlobs:       slices.Clone(c.RiskyPathGlobs),
+		AutoFixCI:            c.AutoFixCI,
+		AutoFixCIMax:         c.AutoFixCIMax,
 	}
 	raw, err := json.MarshalIndent(out, "", "  ")
 	if err != nil {

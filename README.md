@@ -130,6 +130,7 @@ Project is chosen **only** from `channels` config (parent channel when inside a 
 | `@Grok /reset` | Drop session + remove this thread’s git worktree |
 | `@Grok /status` | Show project, session, worktree branch, and queue depth |
 | `@Grok /cancel` | Stop the in-progress run (queued follow-ups still run) |
+| `@Grok /fix-ci` | Fetch failing CI checks for this thread’s PR and queue a minimal fix |
 | `@Grok <task>` + attachments | Download files for Grok to read (logs, screenshots, patches) |
 | Reply to a message with `@Grok <task>` | Include the referenced message text + attachments (e.g. image, then ask Grok) |
 
@@ -142,6 +143,8 @@ While a task is running, the bot updates the status message every few seconds wi
 **PR status card:** after a run, the bot resolves the thread’s PR (URL in the reply, or `gh pr list --head` for the worktree branch), stores it on the session, and posts one editable status message (state, checks rollup, review decision, link). While the PR is open it is polled about every 90s; when the PR is **merged** or **closed**, the card is updated, the worktree/session are cleaned up eagerly (not only on the next task), and `@Grok /status` shows the same PR summary.
 
 **Completion summary:** after a non-cancelled run in a git checkout, the bot posts a **Summary** card with branch/SHA, base (`origin/main` / `main` / …), `git diff --stat` rollup, name-status file list (capped), optional **risk** paths (migrations, auth, deploy, secrets, …), and PR link when known. No extra model call — pure git. Override globs with optional config `riskyPathGlobs` (omit = defaults; `[]` = disable risk flags). Skipped when there are no commits ahead of base and no dirty files.
+
+**CI triage:** while a thread’s PR is open, the PR poller watches checks. On failure it posts a **CI failed** digest (failed job names/links, optional log tail) once per head SHA, and suggests `@Grok /fix-ci`. That command queues a scoped fix on the thread branch (inspect logs, minimal fix, push, update PR). Optional `"autoFixCI": true` auto-queues a fix (default **off**); cap with `"autoFixCIMax"` (default 2 attempts per thread session).
 
 **Attachments (user → Grok):** files on the `@Grok` message are downloaded under `data/attachments/<messageId>/`, absolute paths are added to the prompt, and the directory is deleted when the run finishes. Limits: 10 files, 25 MiB each, 50 MiB total. A mention with only attachments (no text) still starts a task.
 

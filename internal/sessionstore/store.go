@@ -28,6 +28,11 @@ type Entry struct {
 	PRHeadSHA     string `json:"prHeadSha,omitempty"`
 	PRIsDraft     bool   `json:"prIsDraft,omitempty"`
 	PRStatusMsgID string `json:"prStatusMsgId,omitempty"`
+
+	// CI triage (debounced digest + optional auto-fix).
+	CINotifiedSHA  string `json:"ciNotifiedSha,omitempty"`  // head SHA we already posted a CI digest for
+	CIAutoFixCount int    `json:"ciAutoFixCount,omitempty"` // auto-queued fix attempts this session
+	CIAutoFixSHA   string `json:"ciAutoFixSha,omitempty"`   // last head SHA we auto-queued a fix for
 }
 
 type Store struct {

@@ -87,6 +87,9 @@ func (b *Bot) pollPRStatuses(s *discordgo.Session) int {
 				log.Printf("pr-status: cleanup after poll thread=%s: %v", threadID, err)
 				continue
 			}
+		} else {
+			// Open PR: debounced CI failure digest (+ optional auto-fix).
+			b.maybeHandleCIFailure(s, threadID, info)
 		}
 		updated++
 	}
@@ -362,4 +365,7 @@ func preservePRFields(next *sessionstore.Entry, prev sessionstore.Entry) {
 	next.PRHeadSHA = prev.PRHeadSHA
 	next.PRIsDraft = prev.PRIsDraft
 	next.PRStatusMsgID = prev.PRStatusMsgID
+	next.CINotifiedSHA = prev.CINotifiedSHA
+	next.CIAutoFixCount = prev.CIAutoFixCount
+	next.CIAutoFixSHA = prev.CIAutoFixSHA
 }

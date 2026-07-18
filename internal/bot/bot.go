@@ -327,6 +327,8 @@ func (b *Bot) onMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 		}
 	case KindCancel:
 		b.handleCancel(s, m)
+	case KindFixCI:
+		b.handleFixCI(s, m)
 	case KindTask:
 		log.Printf("task: starting async for msg=%s", m.ID)
 		go b.handleTask(s, m, parsed)
@@ -646,29 +648,7 @@ func (b *Bot) handleTask(s *discordgo.Session, m *discordgo.MessageCreate, parse
 		return
 	}
 
-	for {
-		b.executeTask(ctx, item, job)
-		cancel()
-
-		next, ok := b.finishRun(item.threadID)
-		if !ok {
-			// Job released: safe to remove worktree if PR merged/closed during/after the run.
-			b.tryCleanupTerminalPR(item.threadID)
-			return
-		}
-		nextCtx, nextCancel := context.WithCancel(context.Background())
-		nextJob := &runJob{cancel: nextCancel, start: time.Now(), project: next.proj.Name}
-		b.replaceJob(next.threadID, nextJob)
-		log.Printf("task: draining queue thread=%s nextMsg=%s remaining=%d",
-			next.threadID, next.m.ID, b.queueLen(next.threadID))
-		if _, sendErr := next.s.ChannelMessageSend(next.threadID, "Starting queued follow-up…"); sendErr != nil {
-			log.Printf("error: reply queue-start: %v", sendErr)
-		}
-		item = next
-		job = nextJob
-		ctx = nextCtx
-		cancel = nextCancel
-	}
+	b.drainTaskQueue(ctx, cancel, item, job)
 }
 
 func (b *Bot) executeTask(ctx context.Context, item taskItem, job *runJob) {
@@ -1084,6 +1064,8 @@ func kindName(k Kind) string {
 		return "status"
 	case KindCancel:
 		return "cancel"
+	case KindFixCI:
+		return "fix-ci"
 	case KindTask:
 		return "task"
 	default:
