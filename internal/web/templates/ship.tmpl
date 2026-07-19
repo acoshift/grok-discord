@@ -1,0 +1,176 @@
+{{define "content"}}
+<h1 id="page-ship">Ship board</h1>
+<p class="sub">All bot-tracked pull requests for leads — filter by project and state. Status comes from the session store (updated by the Discord PR poller), not a live <span class="mono">gh</span> call.</p>
+
+<div class="grid">
+  <div class="card">
+    <div class="label">Open</div>
+    <div class="value">{{.Ship.Open}}</div>
+    <div class="hint">{{.Ship.Draft}} draft</div>
+  </div>
+  <div class="card">
+    <div class="label">CI failing</div>
+    <div class="value">{{.Ship.ChecksFailing}}</div>
+  </div>
+  <div class="card">
+    <div class="label">Changes requested</div>
+    <div class="value">{{.Ship.ChangesRequested}}</div>
+  </div>
+  <div class="card">
+    <div class="label">Approved</div>
+    <div class="value">{{.Ship.Approved}}</div>
+    <div class="hint">merged {{.Ship.Merged}} · closed {{.Ship.Closed}}</div>
+  </div>
+</div>
+
+<div class="section card">
+  <h2>Filters</h2>
+  <form method="get" action="{{route "ship"}}" class="inline" style="grid-template-columns: 1fr 1fr auto;">
+    <div>
+      <label for="project">Project</label>
+      <select id="project" name="project">
+        <option value="" {{if eq .Ship.ProjectFilter ""}}selected{{end}}>All projects</option>
+        {{range .Ship.Projects}}
+        <option value="{{.}}" {{if eq $.Ship.ProjectFilter .}}selected{{end}}>{{.}}</option>
+        {{end}}
+      </select>
+    </div>
+    <div>
+      <label for="state">State</label>
+      <select id="state" name="state">
+        <option value="open" {{if eq .Ship.StateFilter "open"}}selected{{end}}>Open (default)</option>
+        <option value="failing" {{if eq .Ship.StateFilter "failing"}}selected{{end}}>CI failing</option>
+        <option value="draft" {{if eq .Ship.StateFilter "draft"}}selected{{end}}>Draft</option>
+        <option value="merged" {{if eq .Ship.StateFilter "merged"}}selected{{end}}>Merged</option>
+        <option value="closed" {{if eq .Ship.StateFilter "closed"}}selected{{end}}>Closed</option>
+        <option value="all" {{if eq .Ship.StateFilter "all"}}selected{{end}}>All</option>
+      </select>
+    </div>
+    <button type="submit">Apply</button>
+  </form>
+</div>
+
+<div class="section">
+  <h2>Lead digest</h2>
+  <p class="sub" style="margin-top:0">Plain-text summary of open PRs in the current view — copy for standups or lead chat.</p>
+  <textarea id="ship-digest" readonly rows="10" aria-label="Lead digest">{{.Ship.Digest}}</textarea>
+  <div class="form-actions">
+    <button type="button" class="btn-secondary" id="copy-digest">Copy digest</button>
+    <span class="muted" id="copy-status" style="font-size:0.85rem;"></span>
+  </div>
+</div>
+
+<div class="section">
+  <h2>Pull requests <span class="muted" style="font-weight:500;font-size:0.9rem">({{len .Ship.Rows}} shown · {{.Ship.Total}} tracked{{if .Ship.ProjectFilter}} in {{.Ship.ProjectFilter}}{{end}})</span></h2>
+  {{if .Ship.Rows}}
+  <table>
+    <thead>
+      <tr>
+        <th>PR</th>
+        <th>State</th>
+        <th>Checks</th>
+        <th>Review</th>
+        <th>Project</th>
+        <th>Owner</th>
+        <th>Label</th>
+        <th>Thread</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range .Ship.Rows}}
+      <tr>
+        <td>
+          {{if .URL}}
+          <a href="{{.URL}}" target="_blank" rel="noopener">{{if and .GHOwner .GHRepo .Number}}{{.GHOwner}}/{{.GHRepo}}#{{.Number}}{{else if .Number}}#{{.Number}}{{else}}PR{{end}}</a>
+          {{else}}
+          <span class="mono">{{if .Number}}#{{.Number}}{{else}}—{{end}}</span>
+          {{end}}
+          {{if .Title}}
+          <div class="muted" style="margin-top:0.2rem;font-size:0.86rem;">{{.Title}}</div>
+          {{else if .Goal}}
+          <div class="muted" style="margin-top:0.2rem;font-size:0.86rem;">{{.Goal}}</div>
+          {{end}}
+        </td>
+        <td>
+          {{if eq .State "OPEN"}}
+          <span class="badge live">{{.State}}</span>
+          {{else if eq .State "DRAFT"}}
+          <span class="badge">{{.State}}</span>
+          {{else if eq .State "MERGED"}}
+          <span class="badge status-done">{{.State}}</span>
+          {{else if eq .State "CLOSED"}}
+          <span class="badge status-cancelled">{{.State}}</span>
+          {{else}}
+          <span class="badge">{{.State}}</span>
+          {{end}}
+          {{if .Running}} <span class="badge live">running</span>{{end}}
+          {{if gt .Queue 0}} <span class="badge">queue {{.Queue}}</span>{{end}}
+        </td>
+        <td class="mono">
+          {{if .ChecksFailing}}
+          <span class="badge status-error">{{if .Checks}}{{.Checks}}{{else}}failing{{end}}</span>
+          {{else if .Checks}}
+          {{.Checks}}
+          {{else}}
+          <span class="muted">—</span>
+          {{end}}
+        </td>
+        <td>
+          {{if .ChangesRequested}}
+          <span class="badge status-warn">{{if .Review}}{{.Review}}{{else}}CHANGES_REQUESTED{{end}}</span>
+          {{else if .ReviewApproved}}
+          <span class="badge status-done">{{if .Review}}{{.Review}}{{else}}APPROVED{{end}}</span>
+          {{else if .Review}}
+          {{.Review}}
+          {{else}}
+          <span class="muted">—</span>
+          {{end}}
+        </td>
+        <td>{{if .Project}}{{.Project}}{{else}}<span class="muted">—</span>{{end}}</td>
+        <td>{{if .OwnerName}}{{.OwnerName}}{{else if .OwnerID}}<span class="mono">{{.OwnerID}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
+        <td>
+          <span class="badge">{{.Label}}</span>
+          {{if .LabelManual}} <span class="muted" style="font-size:0.75rem;">manual</span>{{end}}
+        </td>
+        <td class="mono"><a href="/history/{{.ThreadID}}">{{.ThreadID}}</a></td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <div class="empty">
+    {{if eq .Ship.Total 0}}
+    No bot-tracked PRs{{if .Ship.ProjectFilter}} for <span class="mono">{{.Ship.ProjectFilter}}</span>{{end}}. PRs appear after Grok opens or links one in a thread.
+    {{else}}
+    No PRs match this filter ({{.Ship.Total}} tracked{{if .Ship.ProjectFilter}} in {{.Ship.ProjectFilter}}{{end}}).
+    {{end}}
+  </div>
+  {{end}}
+</div>
+
+<script>
+(function () {
+  const btn = document.getElementById("copy-digest");
+  const ta = document.getElementById("ship-digest");
+  const status = document.getElementById("copy-status");
+  if (!btn || !ta) return;
+  btn.addEventListener("click", function () {
+    const text = ta.value;
+    function ok() {
+      status.textContent = "Copied";
+      setTimeout(function () { status.textContent = ""; }, 1500);
+    }
+    function fail() {
+      ta.focus();
+      ta.select();
+      status.textContent = "Select and copy manually";
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(ok).catch(fail);
+    } else {
+      fail();
+    }
+  });
+})();
+</script>
+{{end}}

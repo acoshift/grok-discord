@@ -49,6 +49,7 @@ func New(cfg *config.Config, sessions *sessionstore.Store, hist *history.Store, 
 		"dashboard":            "/",
 		"history":              "/history",
 		"history.thread":       "/history/",
+		"ship":                 "/ship",
 		"worktrees":            "/worktrees",
 		"worktrees.prune":      "/worktrees/prune",
 		"worktrees.pruneIdle":  "/worktrees/prune-idle",
@@ -74,6 +75,7 @@ func New(cfg *config.Config, sessions *sessionstore.Store, hist *history.Store, 
 	tp.ParseFiles("dashboard", "layout.tmpl", "dashboard.tmpl")
 	tp.ParseFiles("history", "layout.tmpl", "history.tmpl")
 	tp.ParseFiles("history_detail", "layout.tmpl", "history_detail.tmpl")
+	tp.ParseFiles("ship", "layout.tmpl", "ship.tmpl")
 	tp.ParseFiles("worktrees", "layout.tmpl", "worktrees.tmpl")
 	tp.ParseFiles("config", "layout.tmpl", "config.tmpl")
 
@@ -81,6 +83,7 @@ func New(cfg *config.Config, sessions *sessionstore.Store, hist *history.Store, 
 	mux.Handle("GET /{$}", hime.Handler(s.dashboard))
 	mux.Handle("GET /history", hime.Handler(s.historyList))
 	mux.Handle("GET /history/{threadID}", hime.Handler(s.historyDetail))
+	mux.Handle("GET /ship", hime.Handler(s.shipPage))
 	mux.Handle("GET /worktrees", hime.Handler(s.worktreesPage))
 	mux.Handle("POST /worktrees/prune", hime.Handler(s.pruneWorktree))
 	mux.Handle("POST /worktrees/prune-idle", hime.Handler(s.pruneIdleWorktrees))
@@ -121,6 +124,7 @@ type pageData struct {
 	Title       string
 	IsDashboard bool
 	IsHistory   bool
+	IsShip      bool
 	IsWorktrees bool
 	IsConfig    bool
 	Flash       string
@@ -128,6 +132,7 @@ type pageData struct {
 	Status      bot.StatusSnapshot
 	Threads     []history.Summary
 	Thread      history.Thread
+	Ship        bot.ShipBoard
 	Worktrees   []bot.WorktreeInfo
 	IdleTTLDays int
 	Config      config.Snapshot
@@ -177,6 +182,16 @@ func (s *Server) historyDetail(ctx *hime.Context) error {
 		Title:     title,
 		IsHistory: true,
 		Thread:    th,
+	})
+}
+
+func (s *Server) shipPage(ctx *hime.Context) error {
+	project := strings.TrimSpace(ctx.FormValue("project"))
+	state := strings.TrimSpace(ctx.FormValue("state"))
+	return ctx.View("ship", pageData{
+		Title:  "Ship board",
+		IsShip: true,
+		Ship:   s.bot.ListShipBoard(project, state),
 	})
 }
 

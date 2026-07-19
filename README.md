@@ -59,6 +59,7 @@ While the process runs it also serves a small server-rendered admin UI (hime + `
 | Path | View |
 |------|------|
 | `/` | Dashboard — live active runs / session counts (SSE refresh) |
+| `/ship` | Ship board — all bot-tracked PRs per project, CI/review status, copyable lead digest |
 | `/history` | Thread list; open a thread to read each user/Grok turn |
 | `/worktrees` | List per-thread git worktrees; prune one or all past idle TTL |
 | `/config` | Add/remove projects, channel→project map, allowed users/roles, worktree idle TTL, CI auto-fix, completion risk globs |

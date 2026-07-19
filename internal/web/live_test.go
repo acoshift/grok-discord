@@ -92,7 +92,7 @@ func TestLiveHTTPLaunch(t *testing.T) {
 	client := &http.Client{Timeout: 5 * time.Second}
 
 	// Pages
-	for _, path := range []string{"/", "/history", "/config"} {
+	for _, path := range []string{"/", "/ship", "/history", "/config"} {
 		res, err := client.Get(base + path)
 		if err != nil {
 			t.Fatalf("GET %s: %v", path, err)
@@ -107,6 +107,10 @@ func TestLiveHTTPLaunch(t *testing.T) {
 		case "/":
 			if !strings.Contains(text, `id="page-dashboard"`) {
 				t.Fatalf("dashboard marker missing")
+			}
+		case "/ship":
+			if !strings.Contains(text, `id="page-ship"`) || !strings.Contains(text, "Lead digest") {
+				t.Fatalf("ship board marker missing: %s", text)
 			}
 		case "/history":
 			if !strings.Contains(text, `id="page-history"`) || !strings.Contains(text, "th-live") {

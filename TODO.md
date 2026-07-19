@@ -167,7 +167,7 @@ Optional complement to mention + text parse — **not** required for team workfl
 - [ ] `/model` or per-channel model override
 - [ ] Cross-thread dedupe (“possible duplicate of …”) + `/link` related threads
 - [ ] Multi-repo attached worktrees (`/with web`) — opt-in; sequential sub-runs first
-- [ ] Ship board web page + lead digest (all bot PRs for a project)
+- [x] Ship board web page + lead digest (all bot PRs for a project)
 - [ ] Searchable `/history` in Discord + fork-continue
 - [ ] Continue from web (deeplink + optional queue follow-up with audit)
 - [ ] Message context menu: **Ask Grok…** (preset + note on a screenshot/log)

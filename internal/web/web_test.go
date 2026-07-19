@@ -88,6 +88,8 @@ func TestPagesRender(t *testing.T) {
 		marker string
 	}{
 		{"/", `id="page-dashboard"`},
+		{"/ship", `id="page-ship"`},
+		{"/ship", "Lead digest"},
 		{"/history", `id="page-history"`},
 		{"/worktrees", `id="page-worktrees"`},
 		{"/worktrees", "Prune idle now"},
@@ -141,6 +143,61 @@ func TestPagesRender(t *testing.T) {
 		if !strings.Contains(detail, want) {
 			t.Fatalf("history detail missing %q in %s", want, detail)
 		}
+	}
+}
+
+func TestShipBoardRendersPRs(t *testing.T) {
+	srv, _, _ := testServer(t)
+	// Seed a tracked PR on the existing session.
+	if err := srv.sessions.Set("thread-99", sessionstore.Entry{
+		SessionID: "sess-99",
+		Project:   "proj",
+		LastUser:  "alice#0",
+		OwnerName: "alice",
+		Goal:      "ship a PR",
+		PRs: []sessionstore.TrackedPR{{
+			URL:    "https://github.com/acme/proj/pull/7",
+			Number: 7,
+			State:  "OPEN",
+			Title:  "add feature x",
+			Checks: "✓ 1 · ✗ 1",
+			Review: "CHANGES_REQUESTED",
+			Owner:  "acme",
+			Repo:   "proj",
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h := srv.Handler()
+	req := httptest.NewRequest(http.MethodGet, "/ship", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	for _, want := range []string{
+		`id="page-ship"`,
+		"acme/proj#7",
+		"add feature x",
+		"CHANGES_REQUESTED",
+		"✗ 1",
+		"alice",
+		"thread-99",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("ship page missing %q in %s", want, body)
+		}
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/ship?project=proj&state=failing", nil)
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("filter status=%d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "acme/proj#7") {
+		t.Fatal("filtered ship page missing PR")
 	}
 }
 
