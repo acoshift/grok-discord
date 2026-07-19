@@ -258,6 +258,9 @@ func (b *Bot) formatHandOffCard(threadID string, e sessionstore.Entry, from, to 
 	if e.WorktreeBranch != "" {
 		lines = append(lines, "**worktree:** `"+e.WorktreeBranch+"`")
 	}
+	if issLines := sessionstore.FormatIssueStatusLines(e.Issues); len(issLines) > 0 {
+		lines = append(lines, issLines...)
+	}
 	e.NormalizePRs()
 	if prLines := ghpr.FormatMultiStatusLines(entryPRInfos(e)); len(prLines) > 0 {
 		lines = append(lines, prLines...)

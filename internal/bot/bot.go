@@ -344,6 +344,11 @@ func (b *Bot) onMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 		} else {
 			lines = append(lines, "**worktree:** (none — main project cwd)")
 		}
+		if issLines := sessionstore.FormatIssueStatusLines(e.Issues); len(issLines) > 0 {
+			lines = append(lines, issLines...)
+		} else {
+			lines = append(lines, "**issue:** (none linked)")
+		}
 		e.NormalizePRs()
 		if prLines := ghpr.FormatMultiStatusLines(entryPRInfos(e)); len(prLines) > 0 {
 			lines = append(lines, prLines...)
@@ -376,6 +381,8 @@ func (b *Bot) onMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 		b.handleLabel(s, m, parsed)
 	case KindBoard:
 		b.handleBoard(s, m, parsed)
+	case KindLink:
+		b.handleLink(s, m, parsed)
 	case KindTask:
 		log.Printf("task: starting async for msg=%s", m.ID)
 		go b.handleTask(s, m, parsed)
@@ -670,6 +677,12 @@ func (b *Bot) handleTask(s *discordgo.Session, m *discordgo.MessageCreate, parse
 		}
 		cancel()
 	}
+	// Prefix Discord thread title with bound/parsed issue numbers (#42 …).
+	titleIssues := sessionstore.ParseIssueRefs(titlePrompt)
+	if e, ok := b.sessions.Get(m.ChannelID); ok && e.HasIssues() {
+		titleIssues = append(titleIssues, e.Issues...)
+	}
+	title = prefixThreadTitleWithIssues(title, titleIssues)
 
 	threadID, err := b.ensureThread(s, m, title)
 	if err != nil {
@@ -803,7 +816,25 @@ func (b *Bot) executeTask(ctx context.Context, item taskItem, job *runJob) {
 	if urls := extractURLs(prompt); len(urls) > 0 {
 		log.Printf("task: urls=%v", urls)
 	}
-	prompt = remoteWorkPromptPrefix(wtBranch) + prompt
+
+	// Auto-bind GitHub issues from the user prompt (+ reply context already folded in).
+	var issueLines []sessionstore.TrackedIssue
+	if e, ok := b.sessions.Get(threadID); ok {
+		owner, repo := defaultIssueRepo(e)
+		b.bindIssuesFromText(threadID, parsed.Prompt, owner, repo)
+		if related != nil {
+			if refText := messagePromptText(related); refText != "" {
+				b.bindIssuesFromText(threadID, refText, owner, repo)
+			}
+		}
+	} else {
+		b.bindIssuesFromText(threadID, parsed.Prompt, "", "")
+	}
+	if e, ok := b.sessions.Get(threadID); ok {
+		issueLines = e.Issues
+	}
+
+	prompt = remoteWorkPromptPrefix(wtBranch) + issueBindingPrompt(issueLines) + prompt
 
 	var sessionID string
 	if e, ok := b.sessions.Get(threadID); ok {
@@ -1170,6 +1201,8 @@ func kindName(k Kind) string {
 		return "label"
 	case KindBoard:
 		return "board"
+	case KindLink:
+		return "link"
 	case KindTask:
 		return "task"
 	default:

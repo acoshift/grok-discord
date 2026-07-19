@@ -25,6 +25,7 @@ Synthesized from multi-agent discussion (2026-07-18): collaboration, PR/CI ship 
 - [x] CI fail → triage loop (digest per head SHA, `@Grok /fix-ci`, optional `autoFixCI` + cap)
 - [x] Thread ownership & hand-off (`owner` / co-owners, `/claim`, `/hand-off @user`, cancel/reset rights + mod override)
 - [x] Continuity / brief card (pinned; goal, done/left, branch, PR, files, questions; `/brief`, hand-off + post-run refresh)
+- [x] Issue / ticket binding (`#N` / issue URL auto-parse, `/link` `/unlink`, PR body Fixes/Refs + title prefix)
 
 ## Design principles (team workflow)
 
@@ -84,7 +85,7 @@ Ship before broad eng-VPN rollout (trusted-but-fallible teammates).
 
 ### PR / review / tickets
 
-- [ ] **Issue / ticket binding** — parse `#N` / issue URL; `/link`; PR body `Fixes`/`Refs` convention; title prefix
+- [x] **Issue / ticket binding** — parse `#N` / issue URL; `/link`; PR body `Fixes`/`Refs` convention; title prefix
 - [ ] **Review request from Discord** — `/ready`, `/review @user` with Discord→GitHub login map; optional `#code-review` radar post
 - [ ] **Review comments → address loop** — `/comments` list unresolved; `/address` fix + push; offer `/rereview`
 - [ ] **PR event timeline** — poller state machine first (approve, changes requested, CI green, merged); webhook later on private HTTP
@@ -135,7 +136,7 @@ Optional complement to mention + text parse — **not** required for team workfl
 | **B. PR-aware thread** | ~~PR status card~~ → ~~completion diff card~~ → ~~CI triage~~ | Ship loop stays in Discord |
 | **C. Safe team mode** | Web auth, audit log, env filter, rate limits, attribution | OK to widen allowlist on shared host |
 | **D. Team artifacts** | ~~Continuity card~~, ~~labels + `/board`~~, templates, action buttons | Durable work items + one-tap controls |
-| **E. Review loop** | Issue bind, `/review`, `/comments`+`/address` | Close the inner review cycle |
+| **E. Review loop** | ~~Issue bind~~, `/review`, `/comments`+`/address` | Close the inner review cycle |
 | **F. Slash (optional)** | Guild register + channel permission allowlist = `config.channels` | Mobile autocomplete without polluting unmapped channels |
 
 ## Explicit non-goals (for now)

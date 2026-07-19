@@ -38,3 +38,15 @@ func TestRemoteWorkPromptPrefixNoWorktree(t *testing.T) {
 		t.Fatalf("unexpected worktree branch line: %s", p)
 	}
 }
+
+func TestIssueBindingPromptInPrefixChain(t *testing.T) {
+	// remote prefix + issue binding is how executeTask assembles the prompt head.
+	head := remoteWorkPromptPrefix("grok/discord/1") + issueBindingPrompt(nil)
+	if !strings.Contains(head, "gh pr create") {
+		t.Fatalf("missing pr create: %s", head)
+	}
+	// empty issues add nothing
+	if strings.Contains(head, "Linked GitHub issues") {
+		t.Fatalf("unexpected issues block: %s", head)
+	}
+}

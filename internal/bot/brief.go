@@ -27,22 +27,23 @@ const (
 
 // BriefCardInput is everything needed to format the continuity / brief card.
 type BriefCardInput struct {
-	Project   string
-	OwnerID   string
-	OwnerName string
-	Goal      string
-	Label     string // lifecycle: open / in progress / …
-	LabelMode string // auto | manual (empty = omit)
-	Status    string // idle / running · …
-	Turns     int
-	Done      []string // recent completed turn previews
-	Left      string
-	Branch    string
-	HeadShort string
-	PRLines   []string
-	Files     []string // name-status lines (status\tpath)
-	Questions []string
-	Queue     int
+	Project    string
+	OwnerID    string
+	OwnerName  string
+	Goal       string
+	Label      string // lifecycle: open / in progress / …
+	LabelMode  string // auto | manual (empty = omit)
+	Status     string // idle / running · …
+	Turns      int
+	Done       []string // recent completed turn previews
+	Left       string
+	Branch     string
+	HeadShort  string
+	IssueLines []string
+	PRLines    []string
+	Files      []string // name-status lines (status\tpath)
+	Questions  []string
+	Queue      int
 }
 
 // FormatBriefCard builds the Discord continuity card (no embeds).
@@ -112,6 +113,10 @@ func FormatBriefCard(in BriefCardInput) string {
 		} else {
 			lines = append(lines, fmt.Sprintf("**branch:** `%s`", b))
 		}
+	}
+
+	if len(in.IssueLines) > 0 {
+		lines = append(lines, in.IssueLines...)
 	}
 
 	if len(in.PRLines) > 0 {
@@ -372,6 +377,8 @@ func (b *Bot) collectBriefInput(threadID string, e sessionstore.Entry, cwd strin
 		state += fmt.Sprintf(" · %d queued", in.Queue)
 	}
 	in.Status = state
+
+	in.IssueLines = sessionstore.FormatIssueStatusLines(e.Issues)
 
 	e.NormalizePRs()
 	in.PRLines = ghpr.FormatMultiStatusLines(entryPRInfos(e))

@@ -24,6 +24,7 @@ const (
 	KindBrief
 	KindLabel
 	KindBoard
+	KindLink
 	KindTask
 )
 
@@ -65,6 +66,10 @@ func ParseMessage(content, botUserID string) Parsed {
 		return Parsed{Kind: KindLabel, Prompt: text}
 	case "/board", "board":
 		return Parsed{Kind: KindBoard, Prompt: text}
+	case "/link", "link":
+		return Parsed{Kind: KindLink, Prompt: text}
+	case "/unlink", "unlink":
+		return Parsed{Kind: KindLink, Prompt: text}
 	}
 
 	if isHandOffCommand(lower) {
@@ -78,6 +83,9 @@ func ParseMessage(content, botUserID string) Parsed {
 	}
 	if isBoardCommand(lower) {
 		return Parsed{Kind: KindBoard, Prompt: text}
+	}
+	if isLinkCommand(lower) {
+		return Parsed{Kind: KindLink, Prompt: text}
 	}
 
 	return Parsed{Kind: KindTask, Prompt: text}
@@ -109,6 +117,11 @@ func isLabelCommand(lower string) bool {
 
 func isBoardCommand(lower string) bool {
 	return strings.HasPrefix(lower, "/board ")
+}
+
+func isLinkCommand(lower string) bool {
+	// "/link …" and "/unlink …" always commands. Bare "link the docs" stays a task.
+	return strings.HasPrefix(lower, "/link ") || strings.HasPrefix(lower, "/unlink ")
 }
 
 func stripBotMention(content, botUserID string) string {
@@ -185,11 +198,12 @@ func HelpText() string {
 		"",
 		"**Commands** (mention the bot first)",
 		"• `/projects` — show this channel's project",
-		"• `/status` — show this thread's owner, session, label, PR, and queue depth if busy",
-		"• `/brief` — pin/update the continuity card (goal, done/left, branch, PR, files)",
+		"• `/status` — show this thread's owner, session, label, issue, PR, and queue depth if busy",
+		"• `/brief` — pin/update the continuity card (goal, done/left, branch, issue, PR, files)",
 		"• `/brief goal <text>` — set the sticky goal, then refresh the card",
 		"• `/label` — show lifecycle label; `/label <open|in_progress|blocked|needs_review|done|abandoned>` sets manual; `/label auto` re-enables auto",
 		"• `/board [project] [label|all]` — team board of threads by lifecycle label",
+		"• `/link #N` — bind a GitHub issue (also auto-parses `#N` / issue URLs in tasks); `/link fix #N` uses `Fixes`; `/unlink #N`; `/link clear`",
 		"• `/claim` — take ownership of this thread (anyone on the allowlist)",
 		"• `/hand-off @user` — transfer ownership and post a short hand-off card",
 		"• `/reset` — forget this thread's session and remove its worktree (owner/mod)",

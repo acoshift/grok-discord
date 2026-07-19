@@ -34,6 +34,10 @@ type Entry struct {
 	Label       string `json:"label,omitempty"`
 	LabelManual bool   `json:"labelManual,omitempty"`
 
+	// Issues tracks GitHub issues/tickets bound to this thread (#N, URL, /link).
+	// Used for PR body Fixes/Refs lines and title prefixes.
+	Issues []TrackedIssue `json:"issues,omitempty"`
+
 	// PRs tracks one or more GitHub pull requests for this thread (multi-repo / multi-PR).
 	// Preferred source of truth; legacy single-PR fields below are kept in sync for older data.
 	PRs []TrackedPR `json:"prs,omitempty"`

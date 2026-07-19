@@ -478,4 +478,5 @@ func preservePRFields(next *sessionstore.Entry, prev sessionstore.Entry) {
 	preserveOwnershipFields(next, prev)
 	preserveBriefFields(next, prev)
 	preserveLabelFields(next, prev)
+	preserveIssueFields(next, prev)
 }

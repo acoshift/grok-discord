@@ -113,6 +113,26 @@ func TestParseMessage(t *testing.T) {
 	if p.Kind != KindTask {
 		t.Fatalf("board free-form should be task, got %+v", p)
 	}
+
+	for _, in := range []string{"/link", "link", "/unlink", "unlink"} {
+		p = ParseMessage("<@123> "+in, "123")
+		if p.Kind != KindLink {
+			t.Fatalf("%q: got %+v want KindLink", in, p)
+		}
+	}
+	p = ParseMessage("<@123> /link #42", "123")
+	if p.Kind != KindLink || !strings.Contains(p.Prompt, "#42") {
+		t.Fatalf("link #42: got %+v", p)
+	}
+	p = ParseMessage("<@123> /unlink #42", "123")
+	if p.Kind != KindLink {
+		t.Fatalf("unlink: got %+v", p)
+	}
+	// Free-form "link the docs" without slash stays a task.
+	p = ParseMessage("<@123> link the docs in the README", "123")
+	if p.Kind != KindTask {
+		t.Fatalf("link free-form should be task, got %+v", p)
+	}
 }
 
 func TestParseMessagePreservesSpecialChars(t *testing.T) {

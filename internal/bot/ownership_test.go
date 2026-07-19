@@ -112,11 +112,15 @@ func TestPreservePRFieldsKeepsOwnership(t *testing.T) {
 	prev := sessionstore.Entry{
 		OwnerID: "o1", OwnerName: "A", CoOwnerIDs: []string{"c1"},
 		PRNumber: 9, PRURL: "https://github.com/o/r/pull/9",
+		Issues:   []sessionstore.TrackedIssue{{Number: 42, Keyword: sessionstore.IssueKeywordFixes}},
 	}
 	next := sessionstore.Entry{SessionID: "s", Project: "p"}
 	preservePRFields(&next, prev)
 	if next.OwnerID != "o1" || next.PRNumber != 9 {
 		t.Fatalf("got %+v", next)
+	}
+	if len(next.Issues) != 1 || next.Issues[0].Number != 42 {
+		t.Fatalf("issues not preserved: %+v", next.Issues)
 	}
 }
 
