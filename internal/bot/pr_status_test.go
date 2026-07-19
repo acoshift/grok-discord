@@ -115,7 +115,7 @@ func TestPrViewCwdFallsBackWithoutGitRoot(t *testing.T) {
 	}
 
 	cfg := &config.Config{
-		Projects: map[string]string{"deploys": proj},
+		Projects: config.PathProjects(map[string]string{"deploys": proj}),
 		DataDir:  root,
 	}
 	b := New(cfg, nil, nil)

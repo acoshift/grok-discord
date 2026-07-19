@@ -79,15 +79,15 @@ func TestAddProjectUserRolePersistAndRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 	var parsed struct {
-		Projects       map[string]string `json:"projects"`
-		AllowedUserIDs []string          `json:"allowedUserIds"`
-		AllowedRoleIDs []string          `json:"allowedRoleIds"`
+		Projects       ProjectsMap `json:"projects"`
+		AllowedUserIDs []string    `json:"allowedUserIds"`
+		AllowedRoleIDs []string    `json:"allowedRoleIds"`
 	}
 	if err := json.Unmarshal(disk, &parsed); err != nil {
 		t.Fatal(err)
 	}
-	if parsed.Projects["newproj"] != newProj {
-		t.Fatalf("disk projects[newproj]=%q", parsed.Projects["newproj"])
+	if parsed.Projects["newproj"].Path != newProj {
+		t.Fatalf("disk projects[newproj]=%+v", parsed.Projects["newproj"])
 	}
 	if !contains(parsed.AllowedUserIDs, "user-2") {
 		t.Fatalf("disk allowedUserIds missing user-2: %v", parsed.AllowedUserIDs)
@@ -155,7 +155,7 @@ func TestAddProjectUserRolePersistAndRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 	var parsed2 struct {
-		Projects       map[string]string `json:"projects"`
+		Projects       ProjectsMap       `json:"projects"`
 		Channels       map[string]string `json:"channels"`
 		AllowedUserIDs []string          `json:"allowedUserIds"`
 		AllowedRoleIDs []string          `json:"allowedRoleIds"`
@@ -176,7 +176,7 @@ func TestAddProjectUserRolePersistAndRuntime(t *testing.T) {
 
 func TestAddProjectValidation(t *testing.T) {
 	cfg := &Config{
-		Projects:     map[string]string{},
+		Projects:     ProjectsMap{},
 		Channels:     map[string]string{},
 		AllowedUsers: map[string]struct{}{},
 		AllowedRoles: map[string]struct{}{},
@@ -231,7 +231,7 @@ func TestSetAutoFixCIAndRiskyGlobs(t *testing.T) {
 		cfg = &Config{
 			DiscordToken:   "t",
 			AllowedUserIDs: []string{"u"},
-			Projects:       map[string]string{"p": dir},
+			Projects:       PathProjects(map[string]string{"p": dir}),
 			Channels:       map[string]string{"c": "p"},
 			ConfigPath:     path,
 			AllowedUsers:   map[string]struct{}{"u": {}},
@@ -285,7 +285,7 @@ func TestSetAutoFixCIAndRiskyGlobs(t *testing.T) {
 
 func TestSetGrokRunLimits(t *testing.T) {
 	cfg := &Config{
-		Projects:   map[string]string{},
+		Projects:   ProjectsMap{},
 		Channels:   map[string]string{},
 		ConfigPath: filepath.Join(t.TempDir(), "config.json"),
 		MaxTurns:   DefaultMaxTurns,
@@ -327,7 +327,7 @@ func TestSetGrokRunLimits(t *testing.T) {
 
 func TestWorktreeIdleTTLDays(t *testing.T) {
 	cfg := &Config{
-		Projects:   map[string]string{},
+		Projects:   ProjectsMap{},
 		Channels:   map[string]string{},
 		ConfigPath: filepath.Join(t.TempDir(), "config.json"),
 	}
@@ -373,7 +373,7 @@ func TestWorktreeIdleTTLDays(t *testing.T) {
 
 func TestBoardSettings(t *testing.T) {
 	cfg := &Config{
-		Projects:   map[string]string{},
+		Projects:   ProjectsMap{},
 		Channels:   map[string]string{},
 		ConfigPath: filepath.Join(t.TempDir(), "config.json"),
 	}

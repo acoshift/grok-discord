@@ -153,6 +153,38 @@
 </div>
 
 <div class="section card">
+  <h2>Linear (per project)</h2>
+  <p class="sub" style="margin:0 0 0.75rem">Opt-in ticket binding. API key is per project (different Linear workspaces allowed). Empty API key field leaves the stored key unchanged. Env alternative: <span class="mono">LINEAR_API_KEY_&lt;PROJECT&gt;</span>.</p>
+  <form class="inline" method="post" action="{{route "config.setProjectLinear"}}" style="grid-template-columns: 1fr 1fr 1fr 1fr auto; align-items: end;">
+    <div>
+      <label for="lin-project">Project</label>
+      <select id="lin-project" name="name" required>
+        <option value="" disabled selected>Select…</option>
+        {{range .Config.ProjectNames}}
+        <option value="{{.}}">{{.}}</option>
+        {{end}}
+      </select>
+    </div>
+    <div>
+      <label for="lin-team">Team key</label>
+      <input id="lin-team" type="text" name="teamKey" placeholder="ENG" autocomplete="off">
+    </div>
+    <div>
+      <label for="lin-key">API key</label>
+      <input id="lin-key" type="password" name="apiKey" placeholder="leave blank to keep" autocomplete="off">
+    </div>
+    <div>
+      <label><input type="checkbox" name="enabled" value="1"> Enabled</label>
+      <label style="display:block;margin-top:0.35rem"><input type="checkbox" name="clearApiKey" value="1"> Clear API key</label>
+    </div>
+    <button type="submit">Save Linear</button>
+  </form>
+  {{if not .Config.ProjectNames}}
+  <p class="sub" style="margin:0.5rem 0 0">Add a project first.</p>
+  {{end}}
+</div>
+
+<div class="section card">
   <h2>Add channel map</h2>
   <form class="inline" method="post" action="{{route "config.addChannel"}}">
     <div>
@@ -212,12 +244,19 @@
   <h2>Projects</h2>
   {{if .Config.Projects}}
   <table>
-    <thead><tr><th>Name</th><th>Path</th><th></th></tr></thead>
+    <thead><tr><th>Name</th><th>Path</th><th>Linear</th><th></th></tr></thead>
     <tbody>
       {{range .Config.Projects}}
       <tr>
         <td class="mono">{{.Name}}</td>
         <td class="mono">{{.Path}}</td>
+        <td class="mono">
+          {{if .LinearEnabled}}
+            on{{if .LinearTeamKey}} · {{.LinearTeamKey}}{{end}}{{if .LinearAPIKeySet}} · key set{{else}} · no key{{end}}
+          {{else}}
+            off
+          {{end}}
+        </td>
         <td class="row-actions">
           <form method="post" action="{{route "config.removeProject"}}" onsubmit="return confirm('Remove project {{.Name}}? Channel maps to this project will also be removed.');">
             <input type="hidden" name="name" value="{{.Name}}">

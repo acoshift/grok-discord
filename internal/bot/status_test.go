@@ -25,7 +25,7 @@ func TestStatusSnapshot(t *testing.T) {
 	}
 
 	cfg := &config.Config{
-		Projects: map[string]string{"app": dir, "api": dir},
+		Projects: config.PathProjects(map[string]string{"app": dir, "api": dir}),
 		AllowedUsers: map[string]struct{}{
 			"u1": {},
 		},

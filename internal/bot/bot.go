@@ -818,18 +818,22 @@ func (b *Bot) executeTask(ctx context.Context, item taskItem, job *runJob) {
 		log.Printf("task: urls=%v", urls)
 	}
 
-	// Auto-bind GitHub issues from the user prompt (+ reply context already folded in).
+	// Auto-bind GitHub (+ Linear when project-enabled) issues from the user prompt.
 	var issueLines []sessionstore.TrackedIssue
+	projName := proj.Name
 	if e, ok := b.sessions.Get(threadID); ok {
 		owner, repo := defaultIssueRepo(e)
 		b.bindIssuesFromText(threadID, parsed.Prompt, owner, repo)
+		b.bindLinearIssuesFromText(threadID, projName, parsed.Prompt)
 		if related != nil {
 			if refText := messagePromptText(related); refText != "" {
 				b.bindIssuesFromText(threadID, refText, owner, repo)
+				b.bindLinearIssuesFromText(threadID, projName, refText)
 			}
 		}
 	} else {
 		b.bindIssuesFromText(threadID, parsed.Prompt, "", "")
+		b.bindLinearIssuesFromText(threadID, projName, parsed.Prompt)
 	}
 	if e, ok := b.sessions.Get(threadID); ok {
 		issueLines = e.Issues

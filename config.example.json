@@ -6,7 +6,14 @@
   ],
   "allowedRoleIds": [],
   "projects": {
-    "app": "/absolute/path/to/app",
+    "app": {
+      "path": "/absolute/path/to/app",
+      "linear": {
+        "enabled": false,
+        "apiKey": "",
+        "teamKey": "ENG"
+      }
+    },
     "api": "/absolute/path/to/api"
   },
   "channels": {

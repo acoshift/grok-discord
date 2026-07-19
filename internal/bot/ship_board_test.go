@@ -14,14 +14,14 @@ import (
 func TestListShipBoard(t *testing.T) {
 	dir := t.TempDir()
 	cfg := &config.Config{
-		Projects: map[string]string{
+		Projects: config.PathProjects(map[string]string{
 			"alpha": filepath.Join(dir, "alpha"),
 			"beta":  filepath.Join(dir, "beta"),
-		},
+		}),
 		DataDir: dir,
 	}
-	for _, p := range cfg.Projects {
-		if err := os.MkdirAll(p, 0o755); err != nil {
+	for _, pc := range cfg.Projects {
+		if err := os.MkdirAll(pc.Path, 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}

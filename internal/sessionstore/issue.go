@@ -15,14 +15,25 @@ const (
 
 const maxTrackedIssues = 5
 
-// TrackedIssue is a GitHub issue/ticket bound to a Discord thread.
+// TrackedIssue is a GitHub or Linear ticket bound to a Discord thread.
 type TrackedIssue struct {
+	// Provider is "github" (default/empty) or "linear".
+	Provider string `json:"provider,omitempty"`
+
+	// GitHub fields
 	Number  int    `json:"number,omitempty"`
 	URL     string `json:"url,omitempty"`
 	Owner   string `json:"owner,omitempty"`
 	Repo    string `json:"repo,omitempty"`
 	// Keyword is "Fixes" (close on merge) or "Refs" (link only). Empty → Refs.
 	Keyword string `json:"keyword,omitempty"`
+
+	// Linear fields (Provider == "linear")
+	Identifier string `json:"identifier,omitempty"` // ENG-123
+	LinearID   string `json:"linearId,omitempty"`   // UUID from API
+	Title      string `json:"title,omitempty"`
+	State      string `json:"state,omitempty"`
+	TeamKey    string `json:"teamKey,omitempty"`
 }
 
 var (
@@ -38,6 +49,15 @@ var (
 
 // IssueKey returns a stable identity for matching tracked issues.
 func (iss TrackedIssue) IssueKey() string {
+	if iss.IsLinear() {
+		if k := linearIssueKey(iss.Identifier); k != "" {
+			return k
+		}
+		if u := strings.TrimSpace(iss.URL); u != "" {
+			return "linear-url:" + strings.ToLower(strings.TrimRight(u, "/"))
+		}
+		return ""
+	}
 	if iss.Owner != "" && iss.Repo != "" && iss.Number > 0 {
 		return strings.ToLower(fmt.Sprintf("%s/%s#%d", iss.Owner, iss.Repo, iss.Number))
 	}
@@ -58,8 +78,11 @@ func (iss TrackedIssue) RepoSlug() string {
 	return ""
 }
 
-// DisplayRef is a short human form: owner/repo#N or #N.
+// DisplayRef is a short human form: ENG-123, owner/repo#N, or #N.
 func (iss TrackedIssue) DisplayRef() string {
+	if iss.IsLinear() {
+		return formatLinearDisplay(iss)
+	}
 	if slug := iss.RepoSlug(); slug != "" && iss.Number > 0 {
 		return fmt.Sprintf("%s#%d", slug, iss.Number)
 	}
@@ -79,8 +102,11 @@ func (iss TrackedIssue) EffectiveKeyword() string {
 	}
 }
 
-// PRBodyLine is the GitHub PR body convention line, e.g. "Fixes #42" or "Fixes o/r#42".
+// PRBodyLine is the PR body convention line, e.g. "Fixes #42" or "Fixes ENG-123".
 func (iss TrackedIssue) PRBodyLine() string {
+	if iss.IsLinear() {
+		return linearPRBodyLine(iss)
+	}
 	kw := iss.EffectiveKeyword()
 	if iss.Number <= 0 {
 		if u := strings.TrimSpace(iss.URL); u != "" {
@@ -146,6 +172,19 @@ func NormalizeIssueKeyword(s string) string {
 
 // sameIssue reports whether two tracked issues refer to the same ticket.
 func sameIssue(a, b TrackedIssue) bool {
+	// Never match across providers.
+	if a.IsLinear() != b.IsLinear() {
+		return false
+	}
+	if a.IsLinear() {
+		if a.IssueKey() != "" && a.IssueKey() == b.IssueKey() {
+			return true
+		}
+		if a.LinearID != "" && a.LinearID == b.LinearID {
+			return true
+		}
+		return false
+	}
 	if a.Number > 0 && a.Number == b.Number {
 		if a.Owner != "" && b.Owner != "" && a.Repo != "" && b.Repo != "" {
 			return strings.EqualFold(a.Owner, b.Owner) && strings.EqualFold(a.Repo, b.Repo)
@@ -177,9 +216,20 @@ func (e *Entry) upsertIssue(iss TrackedIssue, forceKeyword bool) {
 	if e == nil {
 		return
 	}
-	iss.FillFromURL()
-	if iss.Number <= 0 && strings.TrimSpace(iss.URL) == "" {
-		return
+	if iss.IsLinear() {
+		iss.Provider = ProviderLinear
+		iss.Identifier = NormalizeLinearIdentifier(iss.Identifier)
+		if iss.Identifier == "" && strings.TrimSpace(iss.URL) == "" {
+			return
+		}
+		if team, _, ok := splitLinearIdentifier(iss.Identifier); ok && iss.TeamKey == "" {
+			iss.TeamKey = team
+		}
+	} else {
+		iss.FillFromURL()
+		if iss.Number <= 0 && strings.TrimSpace(iss.URL) == "" {
+			return
+		}
 	}
 	if iss.Keyword == "" {
 		iss.Keyword = IssueKeywordRefs
@@ -190,24 +240,45 @@ func (e *Entry) upsertIssue(iss TrackedIssue, forceKeyword bool) {
 	for i := range e.Issues {
 		if sameIssue(e.Issues[i], iss) {
 			prev := e.Issues[i]
-			// Fill missing owner/repo/url from either side.
-			if iss.Owner == "" {
-				iss.Owner = prev.Owner
-			}
-			if iss.Repo == "" {
-				iss.Repo = prev.Repo
-			}
-			if iss.URL == "" {
-				iss.URL = prev.URL
-			}
-			if iss.Number <= 0 {
-				iss.Number = prev.Number
+			if iss.IsLinear() {
+				if iss.Identifier == "" {
+					iss.Identifier = prev.Identifier
+				}
+				if iss.LinearID == "" {
+					iss.LinearID = prev.LinearID
+				}
+				if iss.URL == "" {
+					iss.URL = prev.URL
+				}
+				if iss.Title == "" {
+					iss.Title = prev.Title
+				}
+				if iss.State == "" {
+					iss.State = prev.State
+				}
+				if iss.TeamKey == "" {
+					iss.TeamKey = prev.TeamKey
+				}
+			} else {
+				// Fill missing owner/repo/url from either side.
+				if iss.Owner == "" {
+					iss.Owner = prev.Owner
+				}
+				if iss.Repo == "" {
+					iss.Repo = prev.Repo
+				}
+				if iss.URL == "" {
+					iss.URL = prev.URL
+				}
+				if iss.Number <= 0 {
+					iss.Number = prev.Number
+				}
+				iss.FillFromURL()
 			}
 			// Auto-parse: prefer Fixes over Refs. Manual /link may force either.
 			if !forceKeyword && prev.EffectiveKeyword() == IssueKeywordFixes && iss.EffectiveKeyword() != IssueKeywordFixes {
 				iss.Keyword = IssueKeywordFixes
 			}
-			iss.FillFromURL()
 			e.Issues[i] = iss
 			return
 		}
@@ -219,7 +290,7 @@ func (e *Entry) upsertIssue(iss TrackedIssue, forceKeyword bool) {
 	e.Issues = append(e.Issues, iss)
 }
 
-// RemoveIssue drops a tracked issue by query (URL, #n, owner/repo#n).
+// RemoveIssue drops a tracked issue by query (URL, #n, owner/repo#n, ENG-123).
 func (e *Entry) RemoveIssue(query string) bool {
 	if e == nil {
 		return false
@@ -228,14 +299,18 @@ func (e *Entry) RemoveIssue(query string) bool {
 	if query == "" {
 		return false
 	}
-	parsed := ParseIssueRefs(query)
 	var target TrackedIssue
-	if len(parsed) > 0 {
-		target = parsed[0]
-	} else if n, err := strconv.Atoi(strings.TrimPrefix(query, "#")); err == nil {
-		target = TrackedIssue{Number: n}
+	if lin, ok := parseLinearQuery(query); ok {
+		target = lin
 	} else {
-		return false
+		parsed := ParseIssueRefs(query)
+		if len(parsed) > 0 {
+			target = parsed[0]
+		} else if n, err := strconv.Atoi(strings.TrimPrefix(query, "#")); err == nil {
+			target = TrackedIssue{Number: n}
+		} else {
+			return false
+		}
 	}
 	out := e.Issues[:0]
 	removed := false
@@ -263,20 +338,24 @@ func (e Entry) HasIssues() bool {
 	return len(e.Issues) > 0
 }
 
-// FindIssue looks up a tracked issue by URL, #n, or owner/repo#n.
+// FindIssue looks up a tracked issue by URL, #n, owner/repo#n, or ENG-123.
 func (e Entry) FindIssue(query string) (TrackedIssue, bool) {
 	query = strings.TrimSpace(query)
 	if query == "" {
 		return TrackedIssue{}, false
 	}
-	parsed := ParseIssueRefs(query)
 	var target TrackedIssue
-	if len(parsed) > 0 {
-		target = parsed[0]
-	} else if n, err := strconv.Atoi(strings.TrimPrefix(query, "#")); err == nil {
-		target = TrackedIssue{Number: n}
+	if lin, ok := parseLinearQuery(query); ok {
+		target = lin
 	} else {
-		return TrackedIssue{}, false
+		parsed := ParseIssueRefs(query)
+		if len(parsed) > 0 {
+			target = parsed[0]
+		} else if n, err := strconv.Atoi(strings.TrimPrefix(query, "#")); err == nil {
+			target = TrackedIssue{Number: n}
+		} else {
+			return TrackedIssue{}, false
+		}
 	}
 	for _, iss := range e.Issues {
 		if sameIssue(iss, target) {
@@ -292,42 +371,59 @@ func FormatIssueStatusLines(issues []TrackedIssue) []string {
 		return nil
 	}
 	lines := make([]string, 0, len(issues)+1)
-	if len(issues) == 1 {
-		iss := issues[0]
-		line := fmt.Sprintf("**issue:** %s (%s)", iss.DisplayRef(), iss.EffectiveKeyword())
+	formatOne := func(iss TrackedIssue) string {
+		line := fmt.Sprintf("%s (%s)", iss.DisplayRef(), iss.EffectiveKeyword())
+		if iss.IsLinear() {
+			if st := strings.TrimSpace(iss.State); st != "" {
+				line += " · " + st
+			}
+		}
 		if u := strings.TrimSpace(iss.URL); u != "" {
 			line += " · " + u
 		}
-		lines = append(lines, line)
+		return line
+	}
+	if len(issues) == 1 {
+		lines = append(lines, "**issue:** "+formatOne(issues[0]))
 		return lines
 	}
 	lines = append(lines, fmt.Sprintf("**issues:** (%d)", len(issues)))
 	for _, iss := range issues {
-		line := fmt.Sprintf("• %s (%s)", iss.DisplayRef(), iss.EffectiveKeyword())
-		if u := strings.TrimSpace(iss.URL); u != "" {
-			line += " · " + u
-		}
-		lines = append(lines, line)
+		lines = append(lines, "• "+formatOne(iss))
 	}
 	return lines
 }
 
-// IssueTitlePrefix returns "#42 " or "#42 #99 " for Discord/PR title prefixes.
+// IssueTitlePrefix returns "#42 " and/or "ENG-123 " prefixes for Discord/PR titles.
 func IssueTitlePrefix(issues []TrackedIssue) string {
 	if len(issues) == 0 {
 		return ""
 	}
-	seen := map[int]struct{}{}
+	seenGH := map[int]struct{}{}
+	seenLin := map[string]struct{}{}
 	var parts []string
 	for _, iss := range issues {
-		if iss.Number <= 0 {
-			continue
+		if iss.IsLinear() {
+			id := NormalizeLinearIdentifier(iss.Identifier)
+			if id == "" {
+				continue
+			}
+			key := strings.ToLower(id)
+			if _, ok := seenLin[key]; ok {
+				continue
+			}
+			seenLin[key] = struct{}{}
+			parts = append(parts, id)
+		} else {
+			if iss.Number <= 0 {
+				continue
+			}
+			if _, ok := seenGH[iss.Number]; ok {
+				continue
+			}
+			seenGH[iss.Number] = struct{}{}
+			parts = append(parts, fmt.Sprintf("#%d", iss.Number))
 		}
-		if _, ok := seen[iss.Number]; ok {
-			continue
-		}
-		seen[iss.Number] = struct{}{}
-		parts = append(parts, fmt.Sprintf("#%d", iss.Number))
 		if len(parts) >= 3 {
 			break
 		}

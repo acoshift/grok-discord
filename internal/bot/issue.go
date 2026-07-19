@@ -1,12 +1,15 @@
 package bot
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 
+	"github.com/acoshift/grok-discord/internal/linear"
 	"github.com/acoshift/grok-discord/internal/sessionstore"
 )
 
@@ -20,37 +23,56 @@ func preserveIssueFields(next *sessionstore.Entry, prev sessionstore.Entry) {
 	}
 }
 
-// issueBindingPrompt injects linked-issue contract for Grok (PR body + title).
+// issueBindingPrompt injects linked-ticket contract for Grok (PR body + title).
 func issueBindingPrompt(issues []sessionstore.TrackedIssue) string {
 	if len(issues) == 0 {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("Linked GitHub issues for this Discord thread:\n")
+	b.WriteString("Linked tickets for this Discord thread:\n")
 	for _, iss := range issues {
 		ref := iss.DisplayRef()
 		b.WriteString(fmt.Sprintf("- %s (%s)", ref, iss.EffectiveKeyword()))
+		if iss.IsLinear() {
+			if st := strings.TrimSpace(iss.State); st != "" {
+				b.WriteString(" · " + st)
+			}
+			if t := strings.TrimSpace(iss.Title); t != "" {
+				b.WriteString("\n  Title: " + truncateRunes(t, 200))
+			}
+		}
 		if u := strings.TrimSpace(iss.URL); u != "" {
 			b.WriteString(" · " + u)
 		}
 		b.WriteString("\n")
 	}
 	b.WriteString("When you open or update a pull request you MUST:\n")
-	b.WriteString("1. Include these exact lines in the PR body (GitHub closing keywords):\n")
+	b.WriteString("1. Include these exact lines in the PR body:\n")
 	for _, iss := range issues {
 		if line := iss.PRBodyLine(); line != "" {
 			b.WriteString("   " + line + "\n")
 		}
 	}
-	b.WriteString("2. Prefix the PR title with the issue numbers if missing (e.g. \"")
+	b.WriteString("2. Prefix the PR title with the ticket ids if missing (e.g. \"")
 	b.WriteString(strings.TrimSpace(sessionstore.IssueTitlePrefix(issues)))
 	b.WriteString(" short summary\").\n")
+	hasLinear := false
+	for _, iss := range issues {
+		if iss.IsLinear() {
+			hasLinear = true
+			break
+		}
+	}
+	if hasLinear {
+		b.WriteString("3. Prefer branch names containing the Linear identifier (lowercase, e.g. eng-123-…) when you choose a new branch name.\n")
+		b.WriteString("Linear state is driven by its GitHub integration via the identifier in title/body — do not invent other ticket ids.\n")
+	}
 	b.WriteString("Do not invent other issue numbers. Do not merge the PR.\n\n")
 	return b.String()
 }
 
-// bindIssuesFromText parses issue refs from text and upserts them onto the session.
-// Returns newly-bound or updated issues (may be empty). defaultOwner/Repo fill bare #N.
+// bindIssuesFromText parses GitHub issue refs from text and upserts them onto the session.
+// Returns bound issues after upsert (may be empty). defaultOwner/Repo fill bare #N.
 func (b *Bot) bindIssuesFromText(threadID, text, defaultOwner, defaultRepo string) []sessionstore.TrackedIssue {
 	if b == nil || b.sessions == nil || threadID == "" {
 		return nil
@@ -60,10 +82,33 @@ func (b *Bot) bindIssuesFromText(threadID, text, defaultOwner, defaultRepo strin
 		return nil
 	}
 	sessionstore.FillIssueOwnerRepo(parsed, defaultOwner, defaultRepo)
+	return b.upsertIssues(threadID, parsed)
+}
 
+// bindLinearIssuesFromText parses Linear refs when the project has Linear enabled.
+// Optionally resolves via API when a project API key is set.
+func (b *Bot) bindLinearIssuesFromText(threadID, project, text string) []sessionstore.TrackedIssue {
+	if b == nil || b.sessions == nil || threadID == "" || text == "" {
+		return nil
+	}
+	if b.cfg == nil || !b.cfg.ProjectLinearEnabled(project) {
+		return nil
+	}
+	parsed := sessionstore.ParseLinearIssueRefs(text)
+	if len(parsed) == 0 {
+		return nil
+	}
+	b.resolveLinearIssues(project, parsed)
+	return b.upsertIssues(threadID, parsed)
+}
+
+func (b *Bot) upsertIssues(threadID string, issues []sessionstore.TrackedIssue) []sessionstore.TrackedIssue {
+	if len(issues) == 0 {
+		return nil
+	}
 	var bound []sessionstore.TrackedIssue
 	_, ok, err := b.sessions.Patch(threadID, func(ent *sessionstore.Entry) {
-		for _, iss := range parsed {
+		for _, iss := range issues {
 			ent.UpsertIssue(iss)
 		}
 		bound = append([]sessionstore.TrackedIssue(nil), ent.Issues...)
@@ -75,13 +120,47 @@ func (b *Bot) bindIssuesFromText(threadID, text, defaultOwner, defaultRepo strin
 	if ok {
 		return bound
 	}
-	// No session yet: create shell with issues.
-	e := sessionstore.Entry{Issues: parsed}
+	e := sessionstore.Entry{Issues: issues}
 	if err := b.sessions.Set(threadID, e); err != nil {
 		log.Printf("warn: bind issues create thread=%s: %v", threadID, err)
 		return nil
 	}
-	return parsed
+	return issues
+}
+
+// resolveLinearIssues fills title/state/url/id when the project has an API key.
+func (b *Bot) resolveLinearIssues(project string, issues []sessionstore.TrackedIssue) {
+	if b == nil || b.cfg == nil || !b.cfg.ProjectLinearCanResolve(project) {
+		return
+	}
+	key := b.cfg.ProjectLinearAPIKey(project)
+	client := linear.New(key)
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	defer cancel()
+	for i := range issues {
+		if !issues[i].IsLinear() || issues[i].Identifier == "" {
+			continue
+		}
+		got, err := client.GetByIdentifier(ctx, issues[i].Identifier)
+		if err != nil {
+			log.Printf("warn: linear resolve %s project=%s: %v", issues[i].Identifier, project, err)
+			continue
+		}
+		issues[i].LinearID = got.ID
+		issues[i].Identifier = sessionstore.NormalizeLinearIdentifier(got.Identifier)
+		if got.Title != "" {
+			issues[i].Title = got.Title
+		}
+		if got.State != "" {
+			issues[i].State = got.State
+		}
+		if got.URL != "" {
+			issues[i].URL = got.URL
+		}
+		if got.TeamKey != "" {
+			issues[i].TeamKey = got.TeamKey
+		}
+	}
 }
 
 // defaultIssueRepo returns owner, repo for bare issue numbers from session PRs.
@@ -190,12 +269,42 @@ func (b *Bot) handleLink(s *discordgo.Session, m *discordgo.MessageCreate, parse
 		return
 	}
 
+	// Resolve project for Linear opt-in.
+	parentID := parentChannelID(s, threadID)
+	projName := e.Project
+	if projName == "" {
+		if p, err := b.resolveProject(parentID); err == nil {
+			projName = p.Name
+		}
+	}
+
 	// Optional leading keyword: fix|fixes|closes|refs …
 	keyword, rest := splitLinkKeyword(arg)
-	refs := sessionstore.ParseIssueRefs(rest)
+	var refs []sessionstore.TrackedIssue
+
+	// Prefer Linear when enabled and the arg looks like Linear.
+	if b.cfg != nil && b.cfg.ProjectLinearEnabled(projName) {
+		if lin := sessionstore.ParseLinearIssueRefs(rest); len(lin) > 0 {
+			refs = lin
+			b.resolveLinearIssues(projName, refs)
+		}
+	} else if looksLikeLinearRef(rest) {
+		if _, err := s.ChannelMessageSendReply(threadID,
+			fmt.Sprintf("Linear is not enabled for project **%s**. Enable it in config (`projects.*.linear.enabled`) with a per-project API key.",
+				displayProjectName(projName)), ref(m)); err != nil {
+			log.Printf("error: reply link-linear-off: %v", err)
+		}
+		return
+	}
+
 	if len(refs) == 0 {
-		// Allow bare number without #.
-		refs = sessionstore.ParseIssueRefs("#" + strings.TrimSpace(rest))
+		refs = sessionstore.ParseIssueRefs(rest)
+		if len(refs) == 0 {
+			// Allow bare number without #.
+			refs = sessionstore.ParseIssueRefs("#" + strings.TrimSpace(rest))
+		}
+		owner, repo := defaultIssueRepo(e)
+		sessionstore.FillIssueOwnerRepo(refs, owner, repo)
 	}
 	if len(refs) == 0 {
 		if _, err := s.ChannelMessageSendReply(threadID,
@@ -204,8 +313,6 @@ func (b *Bot) handleLink(s *discordgo.Session, m *discordgo.MessageCreate, parse
 		}
 		return
 	}
-	owner, repo := defaultIssueRepo(e)
-	sessionstore.FillIssueOwnerRepo(refs, owner, repo)
 	if keyword != "" {
 		for i := range refs {
 			refs[i].Keyword = keyword
@@ -220,10 +327,7 @@ func (b *Bot) handleLink(s *discordgo.Session, m *discordgo.MessageCreate, parse
 		ensureSessionOwner(&e, m.Author.ID, m.Author.String())
 	}
 	if e.Project == "" {
-		parentID := parentChannelID(s, threadID)
-		if p, err := b.resolveProject(parentID); err == nil {
-			e.Project = p.Name
-		}
+		e.Project = projName
 	}
 	if err := b.sessions.Set(threadID, e); err != nil {
 		if _, sendErr := s.ChannelMessageSendReply(threadID, "Could not save issues: "+err.Error(), ref(m)); sendErr != nil {
@@ -238,13 +342,35 @@ func (b *Bot) handleLink(s *discordgo.Session, m *discordgo.MessageCreate, parse
 		if full, ok := e.FindIssue(iss.DisplayRef()); ok {
 			iss = full
 		}
-		parts = append(parts, fmt.Sprintf("%s (%s)", iss.DisplayRef(), iss.EffectiveKeyword()))
+		part := fmt.Sprintf("%s (%s)", iss.DisplayRef(), iss.EffectiveKeyword())
+		if iss.IsLinear() && iss.State != "" {
+			part += " · " + iss.State
+		}
+		if iss.IsLinear() && iss.LinearID == "" && b.cfg != nil && b.cfg.ProjectLinearEnabled(projName) && !b.cfg.ProjectLinearCanResolve(projName) {
+			part += " · unresolved (no API key)"
+		}
+		parts = append(parts, part)
 	}
 	msg := "Linked " + strings.Join(parts, ", ") + "."
 	if _, err := s.ChannelMessageSendReply(threadID, msg, ref(m)); err != nil {
 		log.Printf("error: reply link-ok: %v", err)
 	}
 	b.maybeRefreshBriefIssues(s, threadID)
+}
+
+func looksLikeLinearRef(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return false
+	}
+	return len(sessionstore.ParseLinearIssueRefs(s)) > 0
+}
+
+func displayProjectName(name string) string {
+	if strings.TrimSpace(name) == "" {
+		return "(unknown)"
+	}
+	return name
 }
 
 func parseLinkArg(prompt string) string {
@@ -315,7 +441,7 @@ func formatLinkStatus(e sessionstore.Entry) string {
 }
 
 func linkHelpText() string {
-	return "Link: `@Grok /link #42` · `@Grok /link fix #42` · `@Grok /link https://github.com/org/repo/issues/42` · `@Grok /unlink #42` · `@Grok /link clear`"
+	return "Link: `@Grok /link #42` · `@Grok /link ENG-123` · `@Grok /link fix #42` · `@Grok /unlink #42` · `@Grok /link clear`"
 }
 
 func (b *Bot) maybeRefreshBriefIssues(s *discordgo.Session, threadID string) {

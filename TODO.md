@@ -102,15 +102,15 @@ Research note (2026-07): Linear is GraphQL + personal API keys or OAuth (`actor=
 
 #### L1 — bind + prompt (no webhooks)
 
-Ship on top of current GitHub `#N` binding; opt-in config only.
+Ship on top of current GitHub `#N` binding; **opt-in + API key per project**.
 
-- [ ] Parse Linear identifiers & URLs: `ENG-123`, `team/issue/…`, `https://linear.app/<workspace>/issue/ENG-123/…` (and Discord `<…>` wraps)
-- [ ] Resolve via GraphQL (`issue(id:)` / search by identifier): title, state, priority, URL, team, optional description excerpt
-- [ ] Session fields: store `linearId`, `identifier`, `url`, `title`, `state` alongside GitHub issues (or unified ticket model with `provider: github|linear`)
-- [ ] `@Grok /link ENG-123` · `/unlink ENG-123` · show on `/status`, brief, hand-off
-- [ ] Inject into remote-work prompt: issue title + description + acceptance notes; branch name hint `eng-123-…` when empty
-- [ ] PR/title convention: put **`ENG-123`** in PR title and body (`Fixes ENG-123` / `Refs ENG-123` style) so **Linear’s GitHub integration** moves state — bot does not call `issueUpdate` for In Progress/Done
-- [ ] Config: `linear.apiKey` (or env `LINEAR_API_KEY`), optional default `teamId` / team key per `projects` entry; fail soft when unset (parse URL only, no resolve)
+- [x] Parse Linear identifiers & URLs: `ENG-123`, `https://linear.app/<workspace>/issue/ENG-123/…` (and Discord `<…>` wraps)
+- [x] Resolve via GraphQL (team key + number filter): title, state, URL, team; fail soft without key
+- [x] Session fields: unified `TrackedIssue` with `provider: linear` + `linearId`, `identifier`, `url`, `title`, `state`
+- [x] `@Grok /link ENG-123` · `/unlink ENG-123` · show on `/status`, brief, hand-off
+- [x] Inject into remote-work prompt: identifier + title/state; branch name hint `eng-123-…`; PR body `Fixes ENG-123`
+- [x] PR/title convention: put **`ENG-123`** in PR title and body so **Linear’s GitHub integration** moves state — bot does not call `issueUpdate`
+- [x] Config: per-project `projects.*.linear.{enabled,apiKey,teamKey}` (+ env `LINEAR_API_KEY_<PROJECT>`); dual-shape `projects` JSON (string path or object)
 
 #### L2 — write-back cards (API mutations, still no inbound webhooks)
 

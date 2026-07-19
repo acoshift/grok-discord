@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/acoshift/grok-discord/internal/config"
 	"github.com/acoshift/grok-discord/internal/sessionstore"
 )
 
@@ -17,7 +18,7 @@ func TestIssueBindingPrompt(t *testing.T) {
 		{Number: 7, Keyword: sessionstore.IssueKeywordRefs},
 	})
 	for _, want := range []string{
-		"Linked GitHub issues",
+		"Linked tickets",
 		"Fixes o/r#42",
 		"Refs #7",
 		"Prefix the PR title",
@@ -111,5 +112,44 @@ func TestBindIssuesFromText(t *testing.T) {
 	}
 	if e.Issues[0].Owner != "acoshift" {
 		t.Fatalf("owner=%s", e.Issues[0].Owner)
+	}
+}
+
+func TestIssueBindingPromptLinear(t *testing.T) {
+	p := issueBindingPrompt([]sessionstore.TrackedIssue{
+		{Provider: sessionstore.ProviderLinear, Identifier: "ENG-123", Keyword: sessionstore.IssueKeywordFixes, Title: "Auth timeout", State: "In Progress", URL: "https://linear.app/x/issue/ENG-123"},
+	})
+	for _, want := range []string{"ENG-123", "Fixes ENG-123", "In Progress", "Auth timeout", "eng-123"} {
+		if !strings.Contains(p, want) {
+			t.Fatalf("missing %q in:\n%s", want, p)
+		}
+	}
+}
+
+func TestBindLinearIssuesRespectsOptIn(t *testing.T) {
+	b := testBot(t)
+	if err := b.sessions.Set("t2", sessionstore.Entry{Project: "app"}); err != nil {
+		t.Fatal(err)
+	}
+	// Linear disabled by default on test bot projects.
+	bound := b.bindLinearIssuesFromText("t2", "app", "fix ENG-99 please")
+	if len(bound) != 0 {
+		t.Fatalf("expected no bind when disabled: %v", bound)
+	}
+	// Enable Linear for app without API key.
+	if b.cfg.Projects == nil {
+		b.cfg.Projects = config.ProjectsMap{}
+	}
+	b.cfg.Projects["app"] = config.ProjectConfig{
+		Path:   "/tmp/app",
+		Linear: &config.ProjectLinearConfig{Enabled: true, TeamKey: "ENG"},
+	}
+	bound = b.bindLinearIssuesFromText("t2", "app", "fix ENG-99 please")
+	if len(bound) != 1 || bound[0].Identifier != "ENG-99" {
+		t.Fatalf("bound=%+v", bound)
+	}
+	e, _ := b.sessions.Get("t2")
+	if !e.Issues[0].IsLinear() || e.Issues[0].Identifier != "ENG-99" {
+		t.Fatalf("%+v", e.Issues)
 	}
 }

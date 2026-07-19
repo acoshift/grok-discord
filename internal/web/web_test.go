@@ -34,7 +34,7 @@ func testServer(t *testing.T) (*Server, *config.Config, string) {
 		DiscordClientID: "424242424242424242",
 		AllowedUserIDs:  []string{"u0"},
 		AllowedRoleIDs:  []string{},
-		Projects:        map[string]string{"proj": proj},
+		Projects:        config.PathProjects(map[string]string{"proj": proj}),
 		Channels:        map[string]string{"ch": "proj"},
 		AllowedUsers:    map[string]struct{}{"u0": {}},
 		AllowedRoles:    map[string]struct{}{},
@@ -514,7 +514,7 @@ func TestConfigAddsPersist(t *testing.T) {
 		t.Fatal(err)
 	}
 	var disk struct {
-		Projects       map[string]string `json:"projects"`
+		Projects       config.ProjectsMap `json:"projects"`
 		Channels       map[string]string `json:"channels"`
 		AllowedUserIDs []string          `json:"allowedUserIds"`
 		AllowedRoleIDs []string          `json:"allowedRoleIds"`

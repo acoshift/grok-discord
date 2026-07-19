@@ -83,7 +83,7 @@ func TestPruneIdleWorktrees(t *testing.T) {
 	}
 
 	cfg := &config.Config{
-		Projects: map[string]string{"app": repo},
+		Projects: config.PathProjects(map[string]string{"app": repo}),
 		DataDir:  data,
 	}
 	b := New(cfg, sessions, nil)
@@ -157,7 +157,7 @@ func TestListAndPruneWorktree(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := &config.Config{
-		Projects: map[string]string{"app": repo},
+		Projects: config.PathProjects(map[string]string{"app": repo}),
 		DataDir:  data,
 	}
 	b := New(cfg, sessions, nil)
@@ -224,7 +224,7 @@ func TestPruneIdleNowUsesConfig(t *testing.T) {
 	}
 	days := 30
 	cfg := &config.Config{
-		Projects:            map[string]string{"app": repo},
+		Projects:            config.PathProjects(map[string]string{"app": repo}),
 		DataDir:             data,
 		WorktreeIdleTTLDays: &days,
 	}

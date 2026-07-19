@@ -56,8 +56,9 @@ func New(cfg *config.Config, sessions *sessionstore.Store, hist *history.Store, 
 		"worktrees.prune":      "/worktrees/prune",
 		"worktrees.pruneIdle":  "/worktrees/prune-idle",
 		"config":               "/config",
-		"config.addProject":    "/config/projects",
-		"config.removeProject": "/config/projects/remove",
+		"config.addProject":       "/config/projects",
+		"config.removeProject":    "/config/projects/remove",
+		"config.setProjectLinear": "/config/projects/linear",
 		"config.addUser":       "/config/users",
 		"config.removeUser":    "/config/users/remove",
 		"config.addRole":       "/config/roles",
@@ -122,6 +123,7 @@ func New(cfg *config.Config, sessions *sessionstore.Store, hist *history.Store, 
 	mux.Handle("GET /config", hime.Handler(s.configPage))
 	mux.Handle("POST /config/projects", hime.Handler(s.addProject))
 	mux.Handle("POST /config/projects/remove", hime.Handler(s.removeProject))
+	mux.Handle("POST /config/projects/linear", hime.Handler(s.setProjectLinear))
 	mux.Handle("POST /config/users", hime.Handler(s.addUser))
 	mux.Handle("POST /config/users/remove", hime.Handler(s.removeUser))
 	mux.Handle("POST /config/roles", hime.Handler(s.addRole))
@@ -391,6 +393,16 @@ func (s *Server) addProject(ctx *hime.Context) error {
 func (s *Server) removeProject(ctx *hime.Context) error {
 	name := ctx.PostFormValue("name")
 	return s.configRedirect(ctx, fmt.Sprintf("Removed project %q", name), s.cfg.RemoveProject(name))
+}
+
+func (s *Server) setProjectLinear(ctx *hime.Context) error {
+	name := ctx.PostFormValue("name")
+	enabled := ctx.PostFormValue("enabled") == "1" || strings.EqualFold(ctx.PostFormValue("enabled"), "on")
+	clearKey := ctx.PostFormValue("clearApiKey") == "1" || strings.EqualFold(ctx.PostFormValue("clearApiKey"), "on")
+	teamKey := ctx.PostFormValue("teamKey")
+	apiKey := ctx.PostFormValue("apiKey")
+	err := s.cfg.SetProjectLinear(name, enabled, teamKey, apiKey, clearKey)
+	return s.configRedirect(ctx, fmt.Sprintf("Updated Linear for project %q", name), err)
 }
 
 func (s *Server) addUser(ctx *hime.Context) error {

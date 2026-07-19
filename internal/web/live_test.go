@@ -34,7 +34,7 @@ func TestLiveHTTPLaunch(t *testing.T) {
 		DiscordToken:   "tok",
 		AllowedUserIDs: []string{"u0"},
 		AllowedRoleIDs: []string{},
-		Projects:       map[string]string{"proj": proj},
+		Projects:       config.PathProjects(map[string]string{"proj": proj}),
 		Channels:       map[string]string{"ch": "proj"},
 		AllowedUsers:   map[string]struct{}{"u0": {}},
 		AllowedRoles:   map[string]struct{}{},

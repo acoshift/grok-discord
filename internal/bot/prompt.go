@@ -203,7 +203,7 @@ func HelpText() string {
 		"• `/brief goal <text>` — set the sticky goal, then refresh the card",
 		"• `/label` — show lifecycle label; `/label <open|in_progress|blocked|needs_review|done|abandoned>` sets manual; `/label auto` re-enables auto",
 		"• `/board [project] [running|queued|waiting|stale|label|all]` — team activity board (running, queued, waiting on human, stale)",
-		"• `/link #N` — bind a GitHub issue (also auto-parses `#N` / issue URLs in tasks); `/link fix #N` uses `Fixes`; `/unlink #N`; `/link clear`",
+		"• `/link #N` or `/link ENG-123` — bind GitHub/Linear tickets (Linear only when enabled per project); `/link fix …` uses `Fixes`; `/unlink`; `/link clear`",
 		"• `/claim` — take ownership of this thread (anyone on the allowlist)",
 		"• `/hand-off @user` — transfer ownership and post a short hand-off card",
 		"• `/reset` — forget this thread's session and remove its worktree (owner/mod)",

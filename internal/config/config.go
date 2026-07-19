@@ -53,7 +53,7 @@ type Config struct {
 	DiscordClientID      string            `json:"discordClientId,omitempty"`
 	AllowedUserIDs       []string          `json:"allowedUserIds"`
 	AllowedRoleIDs       []string          `json:"allowedRoleIds"`
-	Projects             map[string]string `json:"projects"`
+	Projects             ProjectsMap       `json:"projects"`
 	Channels             map[string]string `json:"channels"` // channel ID → project name
 	GrokBin              string            `json:"grokBin"`
 	Yolo                 *bool             `json:"yolo"`
@@ -94,8 +94,12 @@ type Config struct {
 
 // ProjectItem is a project row for the config UI.
 type ProjectItem struct {
-	Name string
-	Path string
+	Name            string
+	Path            string
+	LinearEnabled   bool
+	LinearTeamKey   string
+	LinearAPIKeySet bool   // true when config or env has a key (never expose the secret)
+	LinearEnvHint   string // e.g. LINEAR_API_KEY_HOMECONNECT
 }
 
 // ChannelItem is a channel→project mapping row for the config UI.
@@ -300,7 +304,7 @@ func Load() (*Config, error) {
 	}
 
 	if c.Projects == nil {
-		c.Projects = map[string]string{}
+		c.Projects = ProjectsMap{}
 	}
 	if c.Channels == nil {
 		c.Channels = map[string]string{}
@@ -312,7 +316,8 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("config.channels must map Discord channel IDs → project names")
 	}
 
-	for name, cwd := range c.Projects {
+	for name, pc := range c.Projects {
+		cwd := pc.Path
 		if !filepath.IsAbs(cwd) {
 			return nil, fmt.Errorf("project %q path must be absolute: %s", name, cwd)
 		}
@@ -368,7 +373,7 @@ func (c *Config) saveLocked() error {
 		DiscordClientID      string            `json:"discordClientId,omitempty"`
 		AllowedUserIDs       []string          `json:"allowedUserIds"`
 		AllowedRoleIDs       []string          `json:"allowedRoleIds"`
-		Projects             map[string]string `json:"projects"`
+		Projects             ProjectsMap       `json:"projects"`
 		Channels             map[string]string `json:"channels"`
 		GrokBin              string            `json:"grokBin"`
 		Yolo                 *bool             `json:"yolo"`
@@ -391,7 +396,7 @@ func (c *Config) saveLocked() error {
 		DiscordClientID:      c.DiscordClientID,
 		AllowedUserIDs:       slices.Clone(c.AllowedUserIDs),
 		AllowedRoleIDs:       slices.Clone(c.AllowedRoleIDs),
-		Projects:             cloneStringMap(c.Projects),
+		Projects:             cloneProjectsMap(c.Projects),
 		Channels:             cloneStringMap(c.Channels),
 		GrokBin:              c.GrokBin,
 		Yolo:                 c.Yolo,
@@ -534,15 +539,15 @@ func (c *Config) AddProject(name, absPath string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.Projects == nil {
-		c.Projects = map[string]string{}
+		c.Projects = ProjectsMap{}
 	}
 	if existing, ok := c.Projects[name]; ok {
-		if existing == absPath {
+		if existing.Path == absPath {
 			return nil
 		}
-		return fmt.Errorf("project %q already exists with path %s", name, existing)
+		return fmt.Errorf("project %q already exists with path %s", name, existing.Path)
 	}
-	c.Projects[name] = absPath
+	c.Projects[name] = ProjectConfig{Path: absPath}
 	return c.saveLocked()
 }
 
@@ -697,7 +702,20 @@ func (c *Config) Snapshot() Snapshot {
 	slices.Sort(names)
 	projects := make([]ProjectItem, 0, len(names))
 	for _, n := range names {
-		projects = append(projects, ProjectItem{Name: n, Path: c.Projects[n]})
+		pc := c.Projects[n]
+		item := ProjectItem{
+			Name:          n,
+			Path:          pc.Path,
+			LinearEnvHint: "LINEAR_API_KEY_" + ProjectEnvKeySuffix(n),
+		}
+		if pc.Linear != nil {
+			item.LinearEnabled = pc.Linear.Enabled
+			item.LinearTeamKey = strings.TrimSpace(pc.Linear.TeamKey)
+			item.LinearAPIKeySet = strings.TrimSpace(pc.Linear.APIKey) != "" || linearAPIKeyFromEnv(n) != ""
+		} else if linearAPIKeyFromEnv(n) != "" {
+			item.LinearAPIKeySet = true
+		}
+		projects = append(projects, item)
 	}
 
 	chIDs := make([]string, 0, len(c.Channels))
@@ -782,8 +800,11 @@ func (c *Config) Snapshot() Snapshot {
 func (c *Config) ProjectPath(name string) (string, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	p, ok := c.Projects[name]
-	return p, ok
+	pc, ok := c.Projects[name]
+	if !ok {
+		return "", false
+	}
+	return pc.Path, true
 }
 
 func (c *Config) ChannelProject(channelID string) (string, bool) {
