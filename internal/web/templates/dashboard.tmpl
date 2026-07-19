@@ -54,6 +54,7 @@
 {{define "dashboard_runs"}}
 <div id="runs-wrap">
   {{if .Status.ActiveRuns}}
+  <div class="table-scroll">
   <table id="runs-table">
     <thead>
       <tr><th>Thread</th><th>Project</th><th>Elapsed</th><th>Queue</th></tr>
@@ -69,6 +70,7 @@
       {{end}}
     </tbody>
   </table>
+  </div>
   {{else}}
   <div class="empty" id="runs-empty">No active runs.</div>
   {{end}}

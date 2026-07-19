@@ -38,6 +38,7 @@
 <div class="section">
   <h2>All worktrees <span class="muted" style="font-weight:500;font-size:0.9rem">({{len .Worktrees}})</span></h2>
   {{if .Worktrees}}
+  <div class="table-scroll">
   <table>
     <thead>
       <tr>
@@ -77,6 +78,7 @@
       {{end}}
     </tbody>
   </table>
+  </div>
   {{else}}
   <div class="empty">No thread worktrees found.</div>
   {{end}}

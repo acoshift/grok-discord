@@ -103,6 +103,7 @@
 <div class="section">
   <h2>Pull requests <span class="muted" style="font-weight:500;font-size:0.9rem">({{len .Ship.Rows}} shown · {{.Ship.Total}} tracked{{if .Ship.ProjectFilter}} in {{.Ship.ProjectFilter}}{{end}})</span></h2>
   {{if .Ship.Rows}}
+  <div class="table-scroll">
   <table>
     <thead>
       <tr>
@@ -177,6 +178,7 @@
       {{end}}
     </tbody>
   </table>
+  </div>
   {{else}}
   <div class="empty">
     {{if eq .Ship.Total 0}}

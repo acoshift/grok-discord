@@ -168,14 +168,25 @@
       letter-spacing: -0.02em;
     }
     .card .hint { color: var(--muted); font-size: 0.82rem; margin-top: 0.25rem; }
-    table {
+    /* Horizontal scroll shell so wide tables never blow out the page. */
+    .table-scroll {
       width: 100%;
-      border-collapse: collapse;
+      max-width: 100%;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior-x: contain;
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: calc(var(--radius) + 2px);
-      overflow: hidden;
       box-shadow: 0 1px 2px hsl(var(--black) / 3%);
+    }
+    table {
+      width: max-content;
+      min-width: 100%;
+      border-collapse: collapse;
+      background: transparent;
+      border: none;
+      margin: 0;
     }
     th, td {
       text-align: left;
@@ -191,6 +202,14 @@
       text-transform: uppercase;
       letter-spacing: 0.04em;
       background: var(--surface-l1);
+      white-space: nowrap;
+    }
+    /* Free-text cells wrap; mono IDs/paths stay on one line and drive horizontal scroll. */
+    td { max-width: 22rem; word-break: break-word; }
+    td.mono,
+    td.row-actions {
+      max-width: none;
+      white-space: nowrap;
     }
     tr:last-child td { border-bottom: none; }
     tr:hover td { background: hsl(var(--neutral-50) / 70%); }
@@ -224,8 +243,10 @@
       display: none;
     }
     @media (max-width: 700px) {
+      .wrap { padding-left: 1rem; padding-right: 1rem; }
       form.inline,
       .inline { grid-template-columns: 1fr; }
+      th, td { padding: 0.55rem 0.65rem; font-size: 0.88rem; }
     }
     label {
       display: block;

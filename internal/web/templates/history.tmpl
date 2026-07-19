@@ -17,6 +17,7 @@
 <p class="sub">Thread conversations with per-turn user prompts and Grok replies ({{len .Threads}} threads).</p>
 
 {{if .Threads}}
+<div class="table-scroll">
 <table>
   <thead>
     <tr>
@@ -41,6 +42,7 @@
     {{end}}
   </tbody>
 </table>
+</div>
 {{else}}
 <div class="empty">No history yet. Turns are recorded after Discord threads run Grok tasks.</div>
 {{end}}
