@@ -96,6 +96,8 @@ func TestPagesRender(t *testing.T) {
 		{"/config", `id="page-config"`},
 		{"/config", `id="bot-invite"`},
 		{"/config", "discord.com/oauth2/authorize"},
+		{"/config", "Manage Messages"},
+		{"/config", "Open / re-authorize"},
 		{"/config", "424242424242424242"},
 	}
 	for _, tc := range cases {

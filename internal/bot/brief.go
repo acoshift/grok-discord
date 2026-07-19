@@ -177,6 +177,9 @@ func (b *Bot) handleBrief(s *discordgo.Session, m *discordgo.MessageCreate, pars
 	ack := "Brief card updated."
 	if pinned {
 		ack = "Brief card updated and pinned."
+	} else {
+		// Pin needs Manage Messages; card still works unpinned.
+		ack = "Brief card updated (not pinned — bot needs **Manage Messages**; re-authorize via the admin Config page install URL)."
 	}
 	if _, err := s.ChannelMessageSendReply(threadID, ack, ref(m)); err != nil {
 		log.Printf("error: reply brief-ok: %v", err)

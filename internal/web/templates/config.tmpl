@@ -10,18 +10,25 @@
 {{end}}
 
 <div class="section card" id="bot-invite">
-  <h2>Bot install URL</h2>
-  <p class="sub" style="margin-top:0">Invite this bot to a Discord server. Permissions match what Grok Discord needs (view channel, send messages, attach files, read history, threads).</p>
+  <h2>Bot install / permission update URL</h2>
+  <p class="sub" style="margin-top:0">
+    Invite this bot or <strong>re-authorize</strong> it on a server already joined so the role picks up the current permission set.
+    Required: View Channel, Send Messages, <strong>Manage Messages</strong> (pin continuity brief card), Attach Files, Read Message History, Create Public Threads, Send Messages in Threads.
+  </p>
   {{if .Config.InviteURL}}
   <div class="invite-row">
     <input id="invite-url" type="text" readonly value="{{.Config.InviteURL}}" onclick="this.select()">
     <button type="button" class="btn btn-secondary" data-copy-target="invite-url">Copy</button>
-    <a class="btn btn-secondary" href="{{.Config.InviteURL}}" target="_blank" rel="noopener noreferrer">Open</a>
+    <a class="btn btn-secondary" href="{{.Config.InviteURL}}" target="_blank" rel="noopener noreferrer">Open / re-authorize</a>
   </div>
   <p class="sub" style="margin:0.65rem 0 0">
     Client ID: <span class="mono">{{.Config.ClientID}}</span>
     · permissions <span class="mono">{{.Config.InvitePermissions}}</span>
     · scope <span class="mono">bot</span>
+  </p>
+  <p class="sub" style="margin:0.35rem 0 0">
+    Changing the URL alone does not upgrade an already-joined bot — open the link above, pick the server, and approve again.
+    Brief pin failures (<span class="mono">Missing Permissions</span> / code <span class="mono">50013</span>) mean Manage Messages is still missing on the bot role.
   </p>
   <p class="sub" style="margin:0.35rem 0 0">Also enable <strong>Message Content Intent</strong> in the Developer Portal (Bot → Privileged Gateway Intents).</p>
   {{else}}
