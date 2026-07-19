@@ -21,8 +21,8 @@ Discord  @Grok fix payment timeout
 1. Open [Discord Developer Portal](https://discord.com/developers/applications) → **New Application**.
 2. **Bot** → **Add Bot** → copy token.
 3. Under **Privileged Gateway Intents**, enable **Message Content Intent** (required). Leave Server Members / Presence off unless you change the code.
-4. **OAuth2 → URL Generator**: scope `bot`; permissions: Send Messages, Create Public Threads, Send Messages in Threads, Read Message History, Manage Messages (needed to pin the continuity brief card).
-5. Invite the bot to your server.
+4. **OAuth2 → URL Generator**: scope `bot`; permissions: View Channel, Send Messages, Manage Messages (pin brief card), Attach Files, Read Message History, Create Public Threads, Send Messages in Threads. Or use the install URL on the admin Config page (same bit set).
+5. Invite / re-authorize the bot so those permissions land on its role (changing the URL alone does not upgrade an already-joined bot).
 
 If you see `websocket: close 4014: Disallowed intent(s)`, the bot is requesting a privileged intent that is still off in the portal — turn **Message Content Intent** on and restart.
 
