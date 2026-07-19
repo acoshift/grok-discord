@@ -78,7 +78,7 @@ Ship before broad eng-VPN rollout (trusted-but-fallible teammates).
 
 - [x] **Continuity / brief card** — pin or update one message: goal, done/left, branch, PR, key files, open questions; refresh on `/brief` and hand-off
 - [x] **Thread labels & lifecycle** — `open → in_progress → blocked → needs_review → done | abandoned`; auto on PR open/merge; `/label`, `/board` filters
-- [x] **Team activity board** — `@Grok /board [project]`: running, queued, waiting on human, stale; optional nightly digest channel
+- [x] **Team activity board** — `@Grok /board`: running, queued, waiting on human, stale (scoped to channel project); optional nightly digest channel
 - [ ] **Task templates / presets** — Investigate · Fix tests · Review PR · Minimal fix via `@Grok /start …` or short aliases; inject fixed preambles; freeform always allowed
 - [x] **Run action bar** — buttons on status/done: Cancel · Continue (modal) · Reset (confirm) · History (admin path; no slash required)
 - [ ] **Notification hygiene** — `notifyOnDone: never | errors | always | long_only`; parent channel quiet, thread local

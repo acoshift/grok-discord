@@ -41,7 +41,17 @@ var canonicalActivityOrder = []string{
 }
 
 func (b *Bot) handleBoard(s *discordgo.Session, m *discordgo.MessageCreate, parsed Parsed) {
-	projectFilter, labelFilter, activityFilter, includeTerminal, errMsg := parseBoardArgs(parsed.Prompt, b.knownProjects())
+	// Board is always scoped to this channel's mapped project (same as tasks).
+	parentID := parentChannelID(s, m.ChannelID)
+	proj, err := b.resolveProject(parentID)
+	if err != nil {
+		if _, sendErr := s.ChannelMessageSendReply(m.ChannelID, err.Error(), ref(m)); sendErr != nil {
+			log.Printf("error: reply board-resolve: %v", sendErr)
+		}
+		return
+	}
+
+	labelFilter, activityFilter, includeTerminal, errMsg := parseBoardArgs(parsed.Prompt)
 	if errMsg != "" {
 		if _, err := s.ChannelMessageSendReply(m.ChannelID, errMsg, ref(m)); err != nil {
 			log.Printf("error: reply board-usage: %v", err)
@@ -49,23 +59,13 @@ func (b *Bot) handleBoard(s *discordgo.Session, m *discordgo.MessageCreate, pars
 		return
 	}
 
+	projectFilter := proj.Name
 	staleDays := b.boardStaleDays()
 	rows := b.collectBoardRows(projectFilter, labelFilter, activityFilter, includeTerminal, staleDays, time.Now())
 	body := formatBoardCard(rows, projectFilter, labelFilter, activityFilter, includeTerminal, staleDays)
 	if _, err := s.ChannelMessageSendReply(m.ChannelID, body, ref(m)); err != nil {
 		log.Printf("error: reply board: %v", err)
 	}
-}
-
-func (b *Bot) knownProjects() map[string]struct{} {
-	out := map[string]struct{}{}
-	if b == nil || b.cfg == nil {
-		return out
-	}
-	for name := range b.cfg.Projects {
-		out[strings.ToLower(name)] = struct{}{}
-	}
-	return out
 }
 
 func (b *Bot) boardStaleDays() int {
@@ -75,15 +75,15 @@ func (b *Bot) boardStaleDays() int {
 	return b.cfg.BoardStaleDaysValue()
 }
 
-// parseBoardArgs: /board [project] [label|activity|all]
-// project must match a configured project name; label uses ParseLabel;
-// activity is running|queued|waiting|stale|active; "all" includes terminal labels.
-func parseBoardArgs(prompt string, projects map[string]struct{}) (project, label, activity string, includeTerminal bool, errMsg string) {
+// parseBoardArgs: /board [label|activity|all]
+// label uses ParseLabel; activity is running|queued|waiting|stale|active;
+// "all" includes terminal labels. Project scope comes from the channel mapping.
+func parseBoardArgs(prompt string) (label, activity string, includeTerminal bool, errMsg string) {
 	text := strings.TrimSpace(prompt)
 	lower := strings.ToLower(text)
 	for _, prefix := range []string{"/board", "board"} {
 		if lower == prefix {
-			return "", "", "", false, ""
+			return "", "", false, ""
 		}
 		if strings.HasPrefix(lower, prefix+" ") {
 			text = strings.TrimSpace(text[len(prefix):])
@@ -92,7 +92,7 @@ func parseBoardArgs(prompt string, projects map[string]struct{}) (project, label
 		}
 	}
 	if text == "" {
-		return "", "", "", false, ""
+		return "", "", false, ""
 	}
 	fields := strings.Fields(lower)
 	for _, f := range fields {
@@ -114,17 +114,13 @@ func parseBoardArgs(prompt string, projects map[string]struct{}) (project, label
 			}
 			continue
 		}
-		if _, ok := projects[f]; ok {
-			project = f
-			continue
-		}
-		return "", "", "", false, fmt.Sprintf(
-			"Unknown board filter `%s`. Use `@Grok /board [project] [running|queued|waiting|stale|active|label|all]`.\n"+
-				"Activity: running, queued, waiting (on human), stale, active · Labels: open, in_progress, blocked, needs_review, done, abandoned.",
+		return "", "", false, fmt.Sprintf(
+			"Unknown board filter `%s`. Use `@Grok /board [running|queued|waiting|stale|active|label|all]`.\n"+
+				"Scoped to this channel's project. Activity: running, queued, waiting (on human), stale, active · Labels: open, in_progress, blocked, needs_review, done, abandoned.",
 			f,
 		)
 	}
-	return project, label, activity, includeTerminal, ""
+	return label, activity, includeTerminal, ""
 }
 
 func parseActivityFilter(s string) (string, bool) {

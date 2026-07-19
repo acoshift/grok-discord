@@ -134,7 +134,7 @@ Project is chosen **only** from `channels` config (parent channel when inside a 
 | `@Grok /brief` | Pin/update the continuity card (goal, label, done/left, branch, PR, key files) |
 | `@Grok /brief goal <text>` | Set the sticky goal, then refresh the brief card |
 | `@Grok /label` | Show lifecycle label; `/label <state>` sets manual; `/label auto` re-enables auto |
-| `@Grok /board [project] [running\|queued\|waiting\|stale\|label\|all]` | Team activity board (running, queued, waiting on human, stale) |
+| `@Grok /board [running\|queued\|waiting\|stale\|label\|all]` | Team activity board for this channel’s project (running, queued, waiting on human, stale) |
 | `@Grok /claim` | Take ownership of this thread |
 | `@Grok /hand-off @user` | Transfer ownership and post a short hand-off card |
 | `@Grok /reset` | Drop session + remove this thread’s git worktree (owner/mod) |
@@ -149,7 +149,7 @@ Project is chosen **only** from `channels` config (parent channel when inside a 
 
 **Lifecycle labels:** each thread has a label `open → in_progress → blocked → needs_review → done | abandoned` (empty = open). Auto: first task → `in_progress`; ready (non-draft) open PR → `needs_review`; all PRs merged → `done`; all closed without merge → `abandoned`. Draft-only PRs stay `in_progress`. `@Grok /label blocked` (etc.) sets a **manual** label and pauses auto until `@Grok /label auto` (merge/close still force terminal labels). Shown on `/status`, brief, and hand-off.
 
-**Team activity board:** `@Grok /board` lists non-terminal threads grouped by **activity**: **running** (active Grok job), **queued** (follow-ups waiting), **waiting on human** (blocked / needs review / changes requested / CI failing), **stale** (no session activity for `boardStaleDays`, default 3), and **active** (everything else). Filter with `/board waiting`, `/board stale`, `/board <project>`, lifecycle label (`/board needs_review`), or `/board all` (includes done/abandoned). Optional nightly digest posts the same card to `boardDigestChannel` (Config page or `config.json`).
+**Team activity board:** `@Grok /board` lists non-terminal threads for **this channel’s mapped project**, grouped by **activity**: **running** (active Grok job), **queued** (follow-ups waiting), **waiting on human** (blocked / needs review / changes requested / CI failing), **stale** (no session activity for `boardStaleDays`, default 3), and **active** (everything else). Filter with `/board waiting`, `/board stale`, lifecycle label (`/board needs_review`), or `/board all` (includes done/abandoned). Optional nightly digest posts an all-projects card to `boardDigestChannel` (Config page or `config.json`).
 
 **Issue / ticket binding:** tasks that mention `#42`, `owner/repo#42`, or a GitHub issue URL are bound on the session (max 5). Close-intent wording (`fix` / `closes` / `resolve` near the ref) stores **Fixes**; otherwise **Refs**. `@Grok /link #42` (or `/link fix #42`, full issue URL) binds manually; `/unlink #42` and `/link clear` remove. Bound issues appear on `/status`, brief, and hand-off; Discord thread titles get a `#N` prefix when retitled; the Grok remote-work prompt requires PR body lines (`Fixes #N` / `Refs #N`) and a matching title prefix when opening a PR. One-way GitHub parse only (no Linear/Jira sync).
 

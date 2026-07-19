@@ -9,45 +9,49 @@ import (
 )
 
 func TestParseBoardArgs(t *testing.T) {
-	projects := map[string]struct{}{"homeconnect": {}, "api": {}}
-
-	proj, lab, act, all, errMsg := parseBoardArgs("/board", projects)
-	if proj != "" || lab != "" || act != "" || all || errMsg != "" {
-		t.Fatalf("empty: %q %q %q %v %q", proj, lab, act, all, errMsg)
+	lab, act, all, errMsg := parseBoardArgs("/board")
+	if lab != "" || act != "" || all || errMsg != "" {
+		t.Fatalf("empty: %q %q %v %q", lab, act, all, errMsg)
 	}
 
-	proj, lab, act, all, errMsg = parseBoardArgs("/board needs_review", projects)
-	if proj != "" || lab != sessionstore.LabelNeedsReview || act != "" || all || errMsg != "" {
-		t.Fatalf("label: %q %q %q %v %q", proj, lab, act, all, errMsg)
+	lab, act, all, errMsg = parseBoardArgs("/board needs_review")
+	if lab != sessionstore.LabelNeedsReview || act != "" || all || errMsg != "" {
+		t.Fatalf("label: %q %q %v %q", lab, act, all, errMsg)
 	}
 
-	proj, lab, act, all, errMsg = parseBoardArgs("/board homeconnect blocked", projects)
-	if proj != "homeconnect" || lab != sessionstore.LabelBlocked || act != "" || all || errMsg != "" {
-		t.Fatalf("proj+label: %q %q %q %v %q", proj, lab, act, all, errMsg)
+	lab, act, all, errMsg = parseBoardArgs("/board blocked")
+	if lab != sessionstore.LabelBlocked || act != "" || all || errMsg != "" {
+		t.Fatalf("label blocked: %q %q %v %q", lab, act, all, errMsg)
 	}
 
-	proj, lab, act, all, errMsg = parseBoardArgs("/board all", projects)
+	lab, act, all, errMsg = parseBoardArgs("/board all")
 	if !all || errMsg != "" || act != "" {
 		t.Fatalf("all: %v %q %q", all, act, errMsg)
 	}
 
-	proj, lab, act, all, errMsg = parseBoardArgs("/board done", projects)
+	lab, act, all, errMsg = parseBoardArgs("/board done")
 	// "done" is an activity filter (and implies terminal).
 	if lab != "" || act != activityDone || !all || errMsg != "" {
 		t.Fatalf("done activity: lab=%q act=%q all=%v err=%q", lab, act, all, errMsg)
 	}
 
-	proj, lab, act, all, errMsg = parseBoardArgs("/board waiting", projects)
+	lab, act, all, errMsg = parseBoardArgs("/board waiting")
 	if act != activityWaiting || lab != "" || all || errMsg != "" {
 		t.Fatalf("waiting: act=%q lab=%q all=%v err=%q", act, lab, all, errMsg)
 	}
 
-	proj, lab, act, all, errMsg = parseBoardArgs("/board api stale", projects)
-	if proj != "api" || act != activityStale || errMsg != "" {
-		t.Fatalf("proj+stale: %q %q %q", proj, act, errMsg)
+	lab, act, all, errMsg = parseBoardArgs("/board stale")
+	if act != activityStale || lab != "" || errMsg != "" {
+		t.Fatalf("stale: act=%q lab=%q err=%q", act, lab, errMsg)
 	}
 
-	_, _, _, _, errMsg = parseBoardArgs("/board nope", projects)
+	// Project names are not board filters; scope comes from the channel mapping.
+	_, _, _, errMsg = parseBoardArgs("/board homeconnect")
+	if errMsg == "" {
+		t.Fatal("expected error for project name filter")
+	}
+
+	_, _, _, errMsg = parseBoardArgs("/board nope")
 	if errMsg == "" {
 		t.Fatal("expected error for unknown filter")
 	}

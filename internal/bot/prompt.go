@@ -202,7 +202,7 @@ func HelpText() string {
 		"• `/brief` — pin/update the continuity card (goal, done/left, branch, issue, PR, files)",
 		"• `/brief goal <text>` — set the sticky goal, then refresh the card",
 		"• `/label` — show lifecycle label; `/label <open|in_progress|blocked|needs_review|done|abandoned>` sets manual; `/label auto` re-enables auto",
-		"• `/board [project] [running|queued|waiting|stale|label|all]` — team activity board (running, queued, waiting on human, stale)",
+		"• `/board [running|queued|waiting|stale|label|all]` — team activity board for this channel's project (running, queued, waiting on human, stale)",
 		"• `/link #N` or `/link ENG-123` — bind GitHub/Linear tickets (Linear only when enabled per project); `/link fix …` uses `Fixes`; `/unlink`; `/link clear`",
 		"• `/claim` — take ownership of this thread (anyone on the allowlist)",
 		"• `/hand-off @user` — transfer ownership and post a short hand-off card",
