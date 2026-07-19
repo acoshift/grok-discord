@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -69,23 +70,24 @@ func (b *Bot) pollPRStatuses(s *discordgo.Session) int {
 			continue
 		}
 
-		repoDir := prRepoDir(e)
-		if repoDir == "" {
-			continue
-		}
+		// Prefer a real git worktree; fall back to project/session path so full
+		// PR URLs still work when the configured project root is a multi-repo
+		// folder without its own .git (gh pr view <url> does not need a repo).
+		repoDir := b.prViewCwd(e)
 
 		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 		for _, pr := range e.PRs {
 			if ghpr.IsTerminal(pr.State) {
 				continue // keep terminal cards as-is until all done
 			}
-			sel := pr.Selector()
+			sel := prViewSelector(pr)
 			if sel == "" {
+				log.Printf("pr-status: skip thread=%s: no PR selector (need URL or number)", threadID)
 				continue
 			}
 			info, err := ghpr.View(ctx, repoDir, sel)
 			if err != nil {
-				log.Printf("pr-status: poll thread=%s pr=%s: %v", threadID, sel, err)
+				log.Printf("pr-status: poll thread=%s pr=%s cwd=%q: %v", threadID, sel, repoDir, err)
 				continue
 			}
 			if err := b.applyPRInfo(s, threadID, info); err != nil {
@@ -118,18 +120,6 @@ func (b *Bot) refreshPRAfterTask(s *discordgo.Session, threadID, repoDir, branch
 	if s == nil || threadID == "" {
 		return
 	}
-	if repoDir == "" {
-		if e, ok := b.sessions.Get(threadID); ok {
-			repoDir = prRepoDir(e)
-		}
-	}
-	if repoDir == "" {
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-	defer cancel()
-
 	var prev sessionstore.Entry
 	if e, ok := b.sessions.Get(threadID); ok {
 		prev = e
@@ -137,7 +127,17 @@ func (b *Bot) refreshPRAfterTask(s *discordgo.Session, threadID, repoDir, branch
 		if branch == "" {
 			branch = e.WorktreeBranch
 		}
+		if repoDir == "" {
+			repoDir = b.prViewCwd(e)
+		}
 	}
+	// Branch discovery needs a real git worktree; URL refreshes do not.
+	if repoDir == "" && branch == "" && !prev.HasAnyPR() && strings.TrimSpace(replyText) == "" {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
 
 	infos := b.discoverPRInfos(ctx, repoDir, prev, branch, replyText)
 	if len(infos) == 0 {
@@ -150,13 +150,13 @@ func (b *Bot) refreshPRAfterTask(s *discordgo.Session, threadID, repoDir, branch
 			if ghpr.IsTerminal(pr.State) {
 				continue
 			}
-			sel := pr.Selector()
+			sel := prViewSelector(pr)
 			if sel == "" {
 				continue
 			}
 			info, err := ghpr.View(ctx, repoDir, sel)
 			if err != nil {
-				log.Printf("pr-status: refresh tracked %s: %v", sel, err)
+				log.Printf("pr-status: refresh tracked %s cwd=%q: %v", sel, repoDir, err)
 				continue
 			}
 			infos = append(infos, info)
@@ -208,12 +208,12 @@ func (b *Bot) discoverPRInfos(ctx context.Context, repoDir string, prev sessions
 		}
 	}
 
-	// 2) Worktree branch PR (primary project repo).
+	// 2) Worktree branch PR (primary project repo) — requires a git worktree.
 	branch = strings.TrimSpace(branch)
 	if branch == "" {
 		branch = strings.TrimSpace(prev.WorktreeBranch)
 	}
-	if branch != "" {
+	if branch != "" && repoDir != "" && gitworktree.IsRepo(repoDir) {
 		if info, err := ghpr.ViewByHead(ctx, repoDir, branch); err == nil {
 			add(info)
 		}
@@ -221,7 +221,7 @@ func (b *Bot) discoverPRInfos(ctx context.Context, repoDir string, prev sessions
 
 	// 3) Already-tracked PRs not rediscovered (refresh).
 	for _, pr := range prev.PRs {
-		sel := pr.Selector()
+		sel := prViewSelector(pr)
 		if sel == "" {
 			continue
 		}
@@ -434,6 +434,50 @@ func prRepoDir(e sessionstore.Entry) string {
 		return e.MainCwd
 	}
 	return ""
+}
+
+// prViewCwd is the working directory for `gh pr view/checks`.
+// Prefer a real git worktree (branch/number selectors). When the project root
+// is a multi-repo folder without .git, fall back to that path (or empty) so
+// full PR URL selectors still work — `gh pr view <url>` does not need a repo.
+func (b *Bot) prViewCwd(e sessionstore.Entry) string {
+	if d := prRepoDir(e); d != "" {
+		return d
+	}
+	if b != nil && b.cfg != nil {
+		if p, ok := b.cfg.ProjectPath(e.Project); ok {
+			if dirExists(p) {
+				return p
+			}
+		}
+	}
+	for _, p := range []string{e.Cwd, e.MainCwd} {
+		if dirExists(p) {
+			return p
+		}
+	}
+	return ""
+}
+
+// prViewSelector prefers a full GitHub URL so gh works outside a git worktree.
+func prViewSelector(pr sessionstore.TrackedPR) string {
+	pr.FillOwnerRepoFromURL()
+	if u := strings.TrimSpace(pr.URL); u != "" {
+		return u
+	}
+	if pr.Owner != "" && pr.Repo != "" && pr.Number > 0 {
+		return fmt.Sprintf("https://github.com/%s/%s/pull/%d", pr.Owner, pr.Repo, pr.Number)
+	}
+	return pr.Selector()
+}
+
+func dirExists(p string) bool {
+	p = strings.TrimSpace(p)
+	if p == "" {
+		return false
+	}
+	st, err := os.Stat(p)
+	return err == nil && st.IsDir()
 }
 
 func entryPRInfos(e sessionstore.Entry) []ghpr.Info {

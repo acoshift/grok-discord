@@ -1,6 +1,8 @@
 package bot
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -96,6 +98,64 @@ func TestPrRepoDirPrefersWorktree(t *testing.T) {
 	// Empty paths → empty (no real git dirs in unit test).
 	if got := prRepoDir(sessionstore.Entry{}); got != "" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func TestPrViewCwdFallsBackWithoutGitRoot(t *testing.T) {
+	// Multi-repo project root: directory exists but is not a git worktree.
+	// Poller used to skip these forever (session PR stuck at OPEN after merge).
+	root := t.TempDir()
+	proj := filepath.Join(root, "monorepo-parent")
+	if err := os.MkdirAll(proj, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Nested real-ish layout without initializing git at parent.
+	if err := os.MkdirAll(filepath.Join(proj, "apiserver"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{
+		Projects: map[string]string{"deploys": proj},
+		DataDir:  root,
+	}
+	b := New(cfg, nil, nil)
+
+	e := sessionstore.Entry{
+		Project: "deploys",
+		Cwd:     proj,
+		MainCwd: proj,
+	}
+	if got := prRepoDir(e); got != "" {
+		t.Fatalf("prRepoDir should be empty for non-git parent, got %q", got)
+	}
+	got := b.prViewCwd(e)
+	if got != proj {
+		t.Fatalf("prViewCwd=%q want project path %q", got, proj)
+	}
+
+	// Session paths missing → still use configured project path.
+	e2 := sessionstore.Entry{Project: "deploys"}
+	if got := b.prViewCwd(e2); got != proj {
+		t.Fatalf("prViewCwd from config=%q want %q", got, proj)
+	}
+}
+
+func TestPrViewSelectorPrefersURL(t *testing.T) {
+	sel := prViewSelector(sessionstore.TrackedPR{
+		Number: 244,
+		Owner:  "deploys-app",
+		Repo:   "apiserver",
+		// No URL — should still build one for non-git cwd polling.
+	})
+	if sel != "https://github.com/deploys-app/apiserver/pull/244" {
+		t.Fatalf("sel=%q", sel)
+	}
+	sel = prViewSelector(sessionstore.TrackedPR{
+		URL:    "https://github.com/deploys-app/apiserver/pull/244",
+		Number: 244,
+	})
+	if sel != "https://github.com/deploys-app/apiserver/pull/244" {
+		t.Fatalf("url sel=%q", sel)
 	}
 }
 
