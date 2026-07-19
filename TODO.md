@@ -93,6 +93,56 @@ Ship before broad eng-VPN rollout (trusted-but-fallible teammates).
 - [ ] **Worktree fleet in Discord** — `/worktrees` list; fetch + create from `origin/main` (not stale local HEAD); idle warn before prune
 - [ ] **Project conventions blurb** — inject from config or repo `GROK_DISCORD.md` (hard-capped); `/conventions`
 
+### Linear (ticket system bridge)
+
+Research note (2026-07): Linear is GraphQL + personal API keys or OAuth (`actor=app` for agents). Native **GitHub integration** already links PRs via `ENG-123` in branch/title/body and automates status — **do not reimplement that**. Prefer Discord-side parse/bind + `attachmentCreate` / comments for our thread unit. Agent Session APIs are Developer Preview (mention/delegate → webhook → agent activities). Attachments are idempotent by URL (good for Discord thread / PR cards). Webhooks cover Issues, Comments, Attachments, Agent session events (needs reachable HTTPS — private Tailscale tunnel or later public edge).
+
+**Design fit:** extend existing issue binding (`session.Issues` / `/link`); one Discord thread still maps to one worktree/session; Linear issue is **metadata + external card**, not a second run owner. Human authority stays in Discord (owner/co-owner); Linear assignee/delegate is optional mirror.
+
+#### L1 — bind + prompt (no webhooks)
+
+Ship on top of current GitHub `#N` binding; opt-in config only.
+
+- [ ] Parse Linear identifiers & URLs: `ENG-123`, `team/issue/…`, `https://linear.app/<workspace>/issue/ENG-123/…` (and Discord `<…>` wraps)
+- [ ] Resolve via GraphQL (`issue(id:)` / search by identifier): title, state, priority, URL, team, optional description excerpt
+- [ ] Session fields: store `linearId`, `identifier`, `url`, `title`, `state` alongside GitHub issues (or unified ticket model with `provider: github|linear`)
+- [ ] `@Grok /link ENG-123` · `/unlink ENG-123` · show on `/status`, brief, hand-off
+- [ ] Inject into remote-work prompt: issue title + description + acceptance notes; branch name hint `eng-123-…` when empty
+- [ ] PR/title convention: put **`ENG-123`** in PR title and body (`Fixes ENG-123` / `Refs ENG-123` style) so **Linear’s GitHub integration** moves state — bot does not call `issueUpdate` for In Progress/Done
+- [ ] Config: `linear.apiKey` (or env `LINEAR_API_KEY`), optional default `teamId` / team key per `projects` entry; fail soft when unset (parse URL only, no resolve)
+
+#### L2 — write-back cards (API mutations, still no inbound webhooks)
+
+- [ ] On bind / first run: `attachmentCreate` Discord thread URL on the Linear issue (title e.g. “Discord thread”, subtitle idle/running/done; metadata: threadId, project, owner)
+- [ ] Refresh attachment on run start/end, PR open, CI fail, terminal PR (idempotent same URL)
+- [ ] Optional one-shot Linear comment on run complete/fail (not every stream edit): summary + PR URL + Discord jump link
+- [ ] `@Grok /linear comment <text>` — post a human/agent note to the bound issue
+- [ ] Optional: create issue from Discord — `@Grok /linear new <title>` or `/file` from thread goal + last error; return `ENG-123` and auto-bind
+
+#### L3 — inbound events (private HTTP)
+
+Requires bot HTTP already used by web UI; webhook secret verify; allowlist Linear IPs/signatures.
+
+- [ ] Webhook: Issue state/title changes → refresh Discord brief/status line for bound threads
+- [ ] Webhook: new comment on bound issue → soft notify in Discord thread (once; respect notification hygiene)
+- [ ] Optional: “Start in Discord” — comment command or label in Linear creates/links a thread in the mapped channel (project→channel reverse map)
+
+#### L4 — Linear Agent (Developer Preview; later)
+
+Only if team wants “assign to Grok in Linear” as a first-class entry point.
+
+- [ ] OAuth app `actor=app` + scopes `app:assignable`, `app:mentionable`; Agent session event webhooks
+- [ ] On delegate/mention: emit thought activity &lt;10s; open or resume Discord thread / worktree run; stream progress as agent activities; final result + PR URL
+- [ ] Map Linear delegate ≠ Discord owner (Discord owner stays human; agent is co-worker)
+- [ ] Explicit non-goal until stable: multi-workspace marketplace listing, billing for agent seats
+
+#### Linear non-goals (keep)
+
+- Full bidirectional field sync (labels, priority, cycles, projects as competing source of truth)
+- Replacing Linear↔GitHub PR status automation
+- Jira/Linear parity mega-adapter; start Linear-only when ticket provider is configured
+- Polling Linear as a second CI/PR state machine when GitHub+Linear native link already covers merge→Done
+
 ### Safety (beyond minimum)
 
 - [ ] **Tiered tool policy** — safe auto / notify / Discord approve for destructive, force-push, cloud CLIs, egress
@@ -138,6 +188,7 @@ Optional complement to mention + text parse — **not** required for team workfl
 | **D. Team artifacts** | ~~Continuity card~~, ~~labels + `/board`~~, templates, action buttons | Durable work items + one-tap controls |
 | **E. Review loop** | ~~Issue bind~~, `/review`, `/comments`+`/address` | Close the inner review cycle |
 | **F. Slash (optional)** | Guild register + channel permission allowlist = `config.channels` | Mobile autocomplete without polluting unmapped channels |
+| **G. Linear bridge** | L1 bind+prompt → L2 attachments/comments → L3 webhooks → (optional) L4 agent | Tickets stay in Linear; execution stays Discord+Grok |
 
 ## Explicit non-goals (for now)
 
@@ -145,7 +196,8 @@ Optional complement to mention + text parse — **not** required for team workfl
 - In-chat project switching (channel map stays source of truth)
 - Replacing GitHub PR review / branch protection
 - Bot auto-merge
-- Full Linear/Jira two-way sync (one-way issue parse + optional `gh` comment only)
+- Full Linear/Jira **field-level two-way sync** (labels, priority, cycles as dual source of truth) — prefer one-way bind + PR identifier convention + optional attachments/comments (see Linear L1–L3)
+- Replacing Linear’s native GitHub PR status automation with bot-owned `issueUpdate` state machines
 - Multi-tenant hard isolation between hostile coworkers
 - Auth-heavy public web app (keep web private; put team UX in Discord)
 - Slash commands that appear in every channel of the server
