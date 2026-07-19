@@ -55,7 +55,7 @@
   <p class="sub" style="margin-top:0">Plain-text summary of open PRs in the current view — copy for standups or lead chat.</p>
   <textarea id="ship-digest" readonly rows="10" aria-label="Lead digest">{{.Ship.Digest}}</textarea>
   <div class="form-actions">
-    <button type="button" class="btn-secondary" id="copy-digest">Copy digest</button>
+    <button type="button" class="btn-secondary" data-copy-target="ship-digest" data-copy-status="copy-status">Copy digest</button>
     <span class="muted" id="copy-status" style="font-size:0.85rem;"></span>
   </div>
 </div>
@@ -148,29 +148,4 @@
   {{end}}
 </div>
 
-<script>
-(function () {
-  const btn = document.getElementById("copy-digest");
-  const ta = document.getElementById("ship-digest");
-  const status = document.getElementById("copy-status");
-  if (!btn || !ta) return;
-  btn.addEventListener("click", function () {
-    const text = ta.value;
-    function ok() {
-      status.textContent = "Copied";
-      setTimeout(function () { status.textContent = ""; }, 1500);
-    }
-    function fail() {
-      ta.focus();
-      ta.select();
-      status.textContent = "Select and copy manually";
-    }
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).then(ok).catch(fail);
-    } else {
-      fail();
-    }
-  });
-})();
-</script>
 {{end}}

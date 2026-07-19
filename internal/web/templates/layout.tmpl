@@ -88,6 +88,7 @@
       color: var(--text);
     }
     header.app .brand span { color: var(--muted); font-weight: 500; }
+    .header-end { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
     nav { display: flex; gap: 0.35rem; flex-wrap: wrap; }
     nav a {
       padding: 0.4rem 0.85rem;
@@ -521,16 +522,138 @@
   <div class="wrap">
     <header class="app">
       <div class="brand">Grok Discord <span>· admin</span></div>
-      <nav>
-        <a href="{{route "dashboard"}}" class="{{if .IsDashboard}}active{{end}}">Dashboard</a>
-        <a href="{{route "ship"}}" class="{{if .IsShip}}active{{end}}">Ship</a>
-        <a href="{{route "history"}}" class="{{if .IsHistory}}active{{end}}">History</a>
-        <a href="{{route "worktrees"}}" class="{{if .IsWorktrees}}active{{end}}">Worktrees</a>
-        <a href="{{route "config"}}" class="{{if .IsConfig}}active{{end}}">Config</a>
-      </nav>
+      <div class="header-end">
+        <nav>
+          <a href="{{route "dashboard"}}" class="{{if .IsDashboard}}active{{end}}">Dashboard</a>
+          <a href="{{route "ship"}}" class="{{if .IsShip}}active{{end}}">Ship</a>
+          <a href="{{route "history"}}" class="{{if .IsHistory}}active{{end}}">History</a>
+          <a href="{{route "worktrees"}}" class="{{if .IsWorktrees}}active{{end}}">Worktrees</a>
+          <a href="{{route "config"}}" class="{{if .IsConfig}}active{{end}}">Config</a>
+        </nav>
+        <span id="sse-status" title="Live updates via SSE">connecting…</span>
+      </div>
     </header>
-    {{template "content" .}}
+    <div id="live-root">
+      {{template "content" .}}
+    </div>
   </div>
+  <script>
+  (function () {
+    var statusEl = document.getElementById("sse-status");
+    var liveRoot = document.getElementById("live-root");
+    var ssePath = {{json .SSEPath}};
+    var refreshing = false;
+    var lastHTML = liveRoot ? liveRoot.innerHTML : "";
+
+    function setStatus(text, cls) {
+      if (!statusEl) return;
+      statusEl.textContent = text;
+      statusEl.className = cls || "";
+    }
+
+    function isEditing() {
+      var el = document.activeElement;
+      if (!el || el === document.body) return false;
+      var tag = el.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+      if (el.isContentEditable) return true;
+      return false;
+    }
+
+    function refresh() {
+      if (!liveRoot || refreshing) return;
+      if (isEditing()) {
+        setStatus("live · paused while editing", "ok");
+        return;
+      }
+      refreshing = true;
+      fetch(location.pathname + location.search, {
+        headers: { "Accept": "text/html", "X-Live-Refresh": "1" },
+        credentials: "same-origin",
+        cache: "no-store"
+      }).then(function (res) {
+        if (!res.ok) throw new Error("status " + res.status);
+        return res.text();
+      }).then(function (html) {
+        if (isEditing()) return;
+        var doc = new DOMParser().parseFromString(html, "text/html");
+        var next = doc.getElementById("live-root");
+        if (!next) return;
+        var nextHTML = next.innerHTML;
+        if (nextHTML === lastHTML) return;
+        var y = window.scrollY;
+        liveRoot.innerHTML = nextHTML;
+        lastHTML = nextHTML;
+        var t = doc.querySelector("title");
+        if (t && t.textContent) document.title = t.textContent;
+        window.scrollTo(0, y);
+      }).catch(function () {
+        setStatus("refresh failed", "err");
+      }).finally(function () {
+        refreshing = false;
+      });
+    }
+
+    // Event delegation so handlers survive #live-root swaps.
+    document.addEventListener("click", function (e) {
+      var copyBtn = e.target.closest("[data-copy-target]");
+      if (!copyBtn) return;
+      e.preventDefault();
+      var id = copyBtn.getAttribute("data-copy-target");
+      var input = id ? document.getElementById(id) : null;
+      var statusId = copyBtn.getAttribute("data-copy-status");
+      var status = statusId ? document.getElementById(statusId) : null;
+      var text = input ? (input.value != null ? input.value : input.textContent) : "";
+      function ok() {
+        if (status) {
+          status.textContent = "Copied";
+          setTimeout(function () { status.textContent = ""; }, 1500);
+        } else {
+          var prev = copyBtn.textContent;
+          copyBtn.textContent = "Copied";
+          setTimeout(function () { copyBtn.textContent = prev; }, 1500);
+        }
+      }
+      function fail() {
+        if (input && input.select) {
+          input.focus();
+          input.select();
+        }
+        if (status) status.textContent = "Select and copy manually";
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(ok).catch(fail);
+      } else {
+        fail();
+      }
+    });
+
+    document.addEventListener("change", function (e) {
+      if (e.target && e.target.id === "risky-use-default") {
+        var ta = document.getElementById("risky-globs");
+        if (ta) ta.readOnly = e.target.checked;
+      }
+    });
+
+    if (!ssePath) {
+      setStatus("offline", "err");
+      return;
+    }
+    var es = new EventSource(ssePath);
+    var firstTick = true;
+    es.onopen = function () { setStatus("live", "ok"); };
+    es.onerror = function () { setStatus("reconnecting…", "err"); };
+    es.onmessage = function () {
+      setStatus("live · " + new Date().toLocaleTimeString(), "ok");
+      // Skip the immediate first tick (page was just rendered).
+      if (firstTick) {
+        firstTick = false;
+        return;
+      }
+      refresh();
+    };
+  })();
+  </script>
 </body>
 </html>
 {{end}}

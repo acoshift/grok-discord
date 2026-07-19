@@ -15,7 +15,7 @@
   {{if .Config.InviteURL}}
   <div class="invite-row">
     <input id="invite-url" type="text" readonly value="{{.Config.InviteURL}}" onclick="this.select()">
-    <button type="button" id="copy-invite" class="btn btn-secondary">Copy</button>
+    <button type="button" class="btn btn-secondary" data-copy-target="invite-url">Copy</button>
     <a class="btn btn-secondary" href="{{.Config.InviteURL}}" target="_blank" rel="noopener noreferrer">Open</a>
   </div>
   <p class="sub" style="margin:0.65rem 0 0">
@@ -24,23 +24,6 @@
     · scope <span class="mono">bot</span>
   </p>
   <p class="sub" style="margin:0.35rem 0 0">Also enable <strong>Message Content Intent</strong> in the Developer Portal (Bot → Privileged Gateway Intents).</p>
-  <script>
-  (function () {
-    var btn = document.getElementById("copy-invite");
-    var input = document.getElementById("invite-url");
-    if (!btn || !input) return;
-    btn.addEventListener("click", function () {
-      input.select();
-      navigator.clipboard.writeText(input.value).then(function () {
-        var prev = btn.textContent;
-        btn.textContent = "Copied";
-        setTimeout(function () { btn.textContent = prev; }, 1500);
-      }).catch(function () {
-        document.execCommand("copy");
-      });
-    });
-  })();
-  </script>
   {{else}}
   <div class="flash err" style="margin:0">Could not build install URL{{if .Config.InviteError}}: {{.Config.InviteError}}{{end}}. Set a valid <span class="mono">discordToken</span> or <span class="mono">discordClientId</span> in config.json.</div>
   {{end}}
@@ -108,16 +91,6 @@
       <button type="submit">Save</button>
     </div>
   </form>
-  <script>
-  (function () {
-    var cb = document.getElementById("risky-use-default");
-    var ta = document.getElementById("risky-globs");
-    if (!cb || !ta) return;
-    cb.addEventListener("change", function () {
-      ta.readOnly = cb.checked;
-    });
-  })();
-  </script>
 </div>
 
 <div class="section card">

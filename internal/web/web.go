@@ -139,13 +139,16 @@ type pageData struct {
 	SSEPath     string
 }
 
+func (s *Server) basePage(ctx *hime.Context) pageData {
+	return pageData{SSEPath: ctx.Route("sse")}
+}
+
 func (s *Server) dashboard(ctx *hime.Context) error {
-	return ctx.View("dashboard", pageData{
-		Title:       "Dashboard",
-		IsDashboard: true,
-		Status:      s.bot.StatusSnapshot(),
-		SSEPath:     ctx.Route("sse"),
-	})
+	d := s.basePage(ctx)
+	d.Title = "Dashboard"
+	d.IsDashboard = true
+	d.Status = s.bot.StatusSnapshot()
+	return ctx.View("dashboard", d)
 }
 
 func (s *Server) historyList(ctx *hime.Context) error {
@@ -155,11 +158,11 @@ func (s *Server) historyList(ctx *hime.Context) error {
 	}
 	// Also surface sessions that have no turns yet (legacy / mid-run).
 	threads = mergeSessionRows(threads, s.sessions.List())
-	return ctx.View("history", pageData{
-		Title:     "History",
-		IsHistory: true,
-		Threads:   threads,
-	})
+	d := s.basePage(ctx)
+	d.Title = "History"
+	d.IsHistory = true
+	d.Threads = threads
+	return ctx.View("history", d)
 }
 
 func (s *Server) historyDetail(ctx *hime.Context) error {
@@ -178,42 +181,42 @@ func (s *Server) historyDetail(ctx *hime.Context) error {
 	if th.Project != "" {
 		title = th.Project + " · " + threadID
 	}
-	return ctx.View("history_detail", pageData{
-		Title:     title,
-		IsHistory: true,
-		Thread:    th,
-	})
+	d := s.basePage(ctx)
+	d.Title = title
+	d.IsHistory = true
+	d.Thread = th
+	return ctx.View("history_detail", d)
 }
 
 func (s *Server) shipPage(ctx *hime.Context) error {
 	project := strings.TrimSpace(ctx.FormValue("project"))
 	state := strings.TrimSpace(ctx.FormValue("state"))
-	return ctx.View("ship", pageData{
-		Title:  "Ship board",
-		IsShip: true,
-		Ship:   s.bot.ListShipBoard(project, state),
-	})
+	d := s.basePage(ctx)
+	d.Title = "Ship board"
+	d.IsShip = true
+	d.Ship = s.bot.ListShipBoard(project, state)
+	return ctx.View("ship", d)
 }
 
 func (s *Server) configPage(ctx *hime.Context) error {
-	return ctx.View("config", pageData{
-		Title:    "Config",
-		IsConfig: true,
-		Config:   s.cfg.Snapshot(),
-		Flash:    ctx.FormValue("ok"),
-		Error:    ctx.FormValue("err"),
-	})
+	d := s.basePage(ctx)
+	d.Title = "Config"
+	d.IsConfig = true
+	d.Config = s.cfg.Snapshot()
+	d.Flash = ctx.FormValue("ok")
+	d.Error = ctx.FormValue("err")
+	return ctx.View("config", d)
 }
 
 func (s *Server) worktreesPage(ctx *hime.Context) error {
-	return ctx.View("worktrees", pageData{
-		Title:       "Worktrees",
-		IsWorktrees: true,
-		Worktrees:   s.bot.ListWorktrees(),
-		IdleTTLDays: s.cfg.WorktreeIdleTTLDaysValue(),
-		Flash:       ctx.FormValue("ok"),
-		Error:       ctx.FormValue("err"),
-	})
+	d := s.basePage(ctx)
+	d.Title = "Worktrees"
+	d.IsWorktrees = true
+	d.Worktrees = s.bot.ListWorktrees()
+	d.IdleTTLDays = s.cfg.WorktreeIdleTTLDaysValue()
+	d.Flash = ctx.FormValue("ok")
+	d.Error = ctx.FormValue("err")
+	return ctx.View("worktrees", d)
 }
 
 func (s *Server) worktreesRedirect(ctx *hime.Context, okMsg string, err error) error {
@@ -401,7 +404,16 @@ func mergeSessionRows(hist []history.Summary, sessions []sessionstore.Listed) []
 	return hist
 }
 
-// sse streams dashboard status as Server-Sent Events (stdlib text/event-stream).
+// sseTick is the lightweight SSE payload. Clients use each event as a signal to
+// re-fetch the current page HTML (all pages live-update the same way).
+// StatusSnapshot fields are kept so existing tests and any custom clients still work.
+type sseTick struct {
+	bot.StatusSnapshot
+	Tick int64 `json:"tick"`
+}
+
+// sse streams live ticks as Server-Sent Events (stdlib text/event-stream).
+// Every admin page connects and re-fetches its HTML on each tick.
 func (s *Server) sse(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -416,9 +428,14 @@ func (s *Server) sse(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
+	var n int64
 	send := func() bool {
-		snap := s.bot.StatusSnapshot()
-		raw, err := json.Marshal(snap)
+		n++
+		payload := sseTick{
+			StatusSnapshot: s.bot.StatusSnapshot(),
+			Tick:           n,
+		}
+		raw, err := json.Marshal(payload)
 		if err != nil {
 			log.Printf("web sse marshal: %v", err)
 			return false

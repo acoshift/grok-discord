@@ -113,6 +113,12 @@ func TestPagesRender(t *testing.T) {
 			if !strings.Contains(body, "Grok Discord") {
 				t.Fatal("missing brand")
 			}
+			// Every page is live-updated via layout SSE client.
+			for _, live := range []string{`id="live-root"`, `id="sse-status"`, "EventSource", "/events"} {
+				if !strings.Contains(body, live) {
+					t.Fatalf("path %s missing live marker %q", tc.path, live)
+				}
+			}
 		})
 	}
 
