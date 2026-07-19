@@ -9,6 +9,10 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
   <script src="/static/htmx.min.js" defer></script>
+  {{/* Must run after htmx.min.js (defer order). Boost defaults to show:top otherwise. */}}
+  <script defer>
+    htmx.config.scrollIntoViewOnBoost = false;
+  </script>
   <script src="/static/sse.js" defer></script>
   <style>
     /* Grok official light theme tokens (from grok.com design system) */
@@ -531,7 +535,7 @@
        hx-boost="true"
        hx-target="#live-root"
        hx-select="#live-root"
-       hx-swap="outerHTML show:none"
+       hx-swap="outerHTML show:none focus-scroll:false"
        {{if .SSEPath}}sse-connect="{{.SSEPath}}"{{end}}>
     <header class="app">
       <div class="brand">Grok Discord <span>· admin</span></div>

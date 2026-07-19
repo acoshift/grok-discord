@@ -127,7 +127,8 @@ func TestPagesRender(t *testing.T) {
 				`hx-boost="true"`,
 				`hx-target="#live-root"`,
 				`hx-select="#live-root"`,
-				`hx-swap="outerHTML show:none"`,
+				`hx-swap="outerHTML show:none focus-scroll:false"`,
+				`scrollIntoViewOnBoost = false`,
 			} {
 				if !strings.Contains(body, live) {
 					t.Fatalf("path %s missing live marker %q", tc.path, live)
