@@ -446,9 +446,36 @@ func (s *Server) updateSettings(ctx *hime.Context) error {
 		return s.updateRiskyPathSettings(ctx)
 	case "worktree":
 		return s.updateWorktreeSettings(ctx)
+	case "run":
+		return s.updateRunSettings(ctx)
 	default:
 		return s.configRedirect(ctx, "", fmt.Errorf("unknown settings section %q", section))
 	}
+}
+
+func (s *Server) updateRunSettings(ctx *hime.Context) error {
+	rawTurns := strings.TrimSpace(ctx.PostFormValue("maxTurns"))
+	rawTimeout := strings.TrimSpace(ctx.PostFormValue("timeoutMs"))
+	if rawTurns == "" {
+		return s.configRedirect(ctx, "", fmt.Errorf("maxTurns is required"))
+	}
+	if rawTimeout == "" {
+		return s.configRedirect(ctx, "", fmt.Errorf("timeoutMs is required"))
+	}
+	maxTurns, err := strconv.Atoi(rawTurns)
+	if err != nil {
+		return s.configRedirect(ctx, "", fmt.Errorf("maxTurns must be an integer"))
+	}
+	timeoutMs, err := strconv.Atoi(rawTimeout)
+	if err != nil {
+		return s.configRedirect(ctx, "", fmt.Errorf("timeoutMs must be an integer"))
+	}
+	if err := s.cfg.SetGrokRunLimits(maxTurns, timeoutMs); err != nil {
+		return s.configRedirect(ctx, "", err)
+	}
+	mins := float64(timeoutMs) / 60000
+	msg := fmt.Sprintf("Grok run limits: maxTurns=%d, timeoutMs=%d (%.1f min)", maxTurns, timeoutMs, mins)
+	return s.configRedirect(ctx, msg, nil)
 }
 
 func (s *Server) updateCISettings(ctx *hime.Context) error {

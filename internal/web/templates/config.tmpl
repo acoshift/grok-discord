@@ -29,6 +29,28 @@
   {{end}}
 </div>
 
+<div class="section card" id="grok-run-limits">
+  <h2>Grok run limits</h2>
+  <p class="sub" style="margin-top:0">
+    Per Discord task: <span class="mono">maxTurns</span> is the tool/turn budget for
+    <span class="mono">grok -p</span>; <span class="mono">timeoutMs</span> kills the process after that many milliseconds.
+    Defaults are <span class="mono">40</span> turns and <span class="mono">1800000</span> ms (30 minutes). Applies to new runs only.
+  </p>
+  <form class="inline" method="post" action="{{route "config.settings"}}" style="grid-template-columns: 1fr 1fr auto;">
+    <input type="hidden" name="section" value="run">
+    <div>
+      <label for="max-turns">Max turns</label>
+      <input id="max-turns" type="number" name="maxTurns" min="1" step="1" required value="{{.Config.MaxTurns}}" autocomplete="off">
+    </div>
+    <div>
+      <label for="timeout-ms">Timeout (ms)</label>
+      <input id="timeout-ms" type="number" name="timeoutMs" min="1" step="1000" required value="{{.Config.TimeoutMs}}" autocomplete="off">
+    </div>
+    <button type="submit">Save</button>
+  </form>
+  <p class="sub" style="margin:0.5rem 0 0">Examples: 15 min = <span class="mono">900000</span>, 30 min = <span class="mono">1800000</span>, 1 h = <span class="mono">3600000</span>.</p>
+</div>
+
 <div class="section card">
   <h2>Worktree idle cleanup</h2>
   <p class="sub" style="margin-top:0">Prune per-thread git worktrees after this many days without activity. <span class="mono">0</span> disables automatic cleanup. Default is <span class="mono">30</span>.</p>

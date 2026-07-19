@@ -283,6 +283,42 @@ func TestSetAutoFixCIAndRiskyGlobs(t *testing.T) {
 	}
 }
 
+func TestSetGrokRunLimits(t *testing.T) {
+	cfg := &Config{
+		Projects:   map[string]string{},
+		Channels:   map[string]string{},
+		ConfigPath: filepath.Join(t.TempDir(), "config.json"),
+		MaxTurns:   DefaultMaxTurns,
+		TimeoutMs:  DefaultTimeoutMs,
+	}
+	if cfg.MaxTurnsValue() != DefaultMaxTurns || cfg.TimeoutMsValue() != DefaultTimeoutMs {
+		t.Fatalf("defaults turns=%d timeout=%d", cfg.MaxTurnsValue(), cfg.TimeoutMsValue())
+	}
+	if err := cfg.SetGrokRunLimits(0, 1000); err == nil {
+		t.Fatal("expected error for maxTurns 0")
+	}
+	if err := cfg.SetGrokRunLimits(10, 0); err == nil {
+		t.Fatal("expected error for timeoutMs 0")
+	}
+	if err := cfg.SetGrokRunLimits(25, 900_000); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MaxTurnsValue() != 25 || cfg.TimeoutMsValue() != 900_000 {
+		t.Fatalf("turns=%d timeout=%d", cfg.MaxTurnsValue(), cfg.TimeoutMsValue())
+	}
+	snap := cfg.Snapshot()
+	if snap.MaxTurns != 25 || snap.TimeoutMs != 900_000 {
+		t.Fatalf("snap turns=%d timeout=%d", snap.MaxTurns, snap.TimeoutMs)
+	}
+	raw, err := os.ReadFile(cfg.ConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"maxTurns": 25`) || !strings.Contains(string(raw), `"timeoutMs": 900000`) {
+		t.Fatalf("persist missing values: %s", raw)
+	}
+}
+
 func TestWorktreeIdleTTLDays(t *testing.T) {
 	cfg := &Config{
 		Projects:   map[string]string{},

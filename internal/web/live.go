@@ -113,8 +113,9 @@ func (s *Server) fpWorktrees() string {
 func (s *Server) fpConfig() string {
 	snap := s.cfg.Snapshot()
 	var b strings.Builder
-	fmt.Fprintf(&b, "ttl=%d af=%v max=%d riskyDef=%v\n",
-		snap.WorktreeIdleTTLDays, snap.AutoFixCI, snap.AutoFixCIMax, snap.RiskyPathUseDefault)
+	fmt.Fprintf(&b, "ttl=%d af=%v max=%d riskyDef=%v turns=%d timeoutMs=%d\n",
+		snap.WorktreeIdleTTLDays, snap.AutoFixCI, snap.AutoFixCIMax, snap.RiskyPathUseDefault,
+		snap.MaxTurns, snap.TimeoutMs)
 	fmt.Fprintf(&b, "risky=%s\n", snap.RiskyPathGlobsText)
 	fmt.Fprintf(&b, "invite=%s|%s\n", snap.ClientID, snap.InviteURL)
 	for _, p := range snap.Projects {

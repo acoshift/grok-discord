@@ -15,6 +15,8 @@ const (
 	defaultHTTPListen          = ":8787"
 	DefaultWorktreeIdleTTLDays = 30
 	DefaultAutoFixCIMax        = 2
+	DefaultMaxTurns            = 40
+	DefaultTimeoutMs           = 30 * 60 * 1000 // 30 minutes
 )
 
 // DefaultRiskyPathGlobs flags completion-card paths that usually need careful review.
@@ -100,7 +102,8 @@ type Snapshot struct {
 	HTTPListen          string
 	GrokBin             string
 	Model               string
-	MaxTurns            int
+	MaxTurns            int // effective (default 40)
+	TimeoutMs           int // effective (default 1800000 = 30m)
 	Yolo                bool
 	WorktreeIsolation   bool
 	WorktreeIdleTTLDays int // effective value (default 30 when unset)
@@ -277,10 +280,10 @@ func Load() (*Config, error) {
 		c.GrokBin = "grok"
 	}
 	if c.MaxTurns <= 0 {
-		c.MaxTurns = 40
+		c.MaxTurns = DefaultMaxTurns
 	}
 	if c.TimeoutMs <= 0 {
-		c.TimeoutMs = 30 * 60 * 1000
+		c.TimeoutMs = DefaultTimeoutMs
 	}
 	if c.SummarizeTimeoutMs <= 0 {
 		c.SummarizeTimeoutMs = 45_000
@@ -356,6 +359,48 @@ func (c *Config) saveLocked() error {
 	}
 	raw = append(raw, '\n')
 	return os.WriteFile(c.ConfigPath, raw, 0o600)
+}
+
+// MaxTurnsValue returns the per-run turn cap (default DefaultMaxTurns when unset/invalid).
+func (c *Config) MaxTurnsValue() int {
+	if c == nil {
+		return DefaultMaxTurns
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.MaxTurns <= 0 {
+		return DefaultMaxTurns
+	}
+	return c.MaxTurns
+}
+
+// TimeoutMsValue returns the per-run timeout in milliseconds (default DefaultTimeoutMs).
+func (c *Config) TimeoutMsValue() int {
+	if c == nil {
+		return DefaultTimeoutMs
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.TimeoutMs <= 0 {
+		return DefaultTimeoutMs
+	}
+	return c.TimeoutMs
+}
+
+// SetGrokRunLimits sets maxTurns and timeoutMs for Grok task runs and persists.
+// Both must be >= 1. Applies to subsequent runs (in-flight runs keep their limits).
+func (c *Config) SetGrokRunLimits(maxTurns, timeoutMs int) error {
+	if maxTurns < 1 {
+		return fmt.Errorf("maxTurns must be >= 1")
+	}
+	if timeoutMs < 1 {
+		return fmt.Errorf("timeoutMs must be >= 1")
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.MaxTurns = maxTurns
+	c.TimeoutMs = timeoutMs
+	return c.saveLocked()
 }
 
 // SetWorktreeIdleTTLDays sets days of inactivity before worktree prune and persists.
@@ -621,6 +666,14 @@ func (c *Config) Snapshot() Snapshot {
 	} else {
 		riskyText = strings.Join(DefaultRiskyPathGlobs, "\n")
 	}
+	maxTurns := c.MaxTurns
+	if maxTurns <= 0 {
+		maxTurns = DefaultMaxTurns
+	}
+	timeoutMs := c.TimeoutMs
+	if timeoutMs <= 0 {
+		timeoutMs = DefaultTimeoutMs
+	}
 	snap := Snapshot{
 		Projects:            projects,
 		Channels:            channels,
@@ -630,7 +683,8 @@ func (c *Config) Snapshot() Snapshot {
 		HTTPListen:          c.HTTPListen,
 		GrokBin:             c.GrokBin,
 		Model:               c.Model,
-		MaxTurns:            c.MaxTurns,
+		MaxTurns:            maxTurns,
+		TimeoutMs:           timeoutMs,
 		Yolo:                c.YoloEnabled(),
 		WorktreeIsolation:   c.WorktreeIsolationEnabled(),
 		WorktreeIdleTTLDays: idleDays,

@@ -842,8 +842,10 @@ func (b *Bot) executeTask(ctx context.Context, item taskItem, job *runJob) {
 		log.Printf("task: resume session=%s", sessionID)
 	}
 
+	maxTurns := b.cfg.MaxTurnsValue()
+	timeout := time.Duration(b.cfg.TimeoutMsValue()) * time.Millisecond
 	log.Printf("task: running grok bin=%s yolo=%v maxTurns=%d timeout=%s cwd=%s stream=true",
-		b.cfg.GrokBin, b.cfg.YoloEnabled(), b.cfg.MaxTurns, time.Duration(b.cfg.TimeoutMs)*time.Millisecond, runCwd)
+		b.cfg.GrokBin, b.cfg.YoloEnabled(), maxTurns, timeout, runCwd)
 
 	result := grokrun.Run(ctx, grokrun.Options{
 		GrokBin:   b.cfg.GrokBin,
@@ -852,8 +854,8 @@ func (b *Bot) executeTask(ctx context.Context, item taskItem, job *runJob) {
 		SessionID: sessionID,
 		Yolo:      b.cfg.YoloEnabled(),
 		Model:     b.cfg.Model,
-		MaxTurns:  b.cfg.MaxTurns,
-		Timeout:   time.Duration(b.cfg.TimeoutMs) * time.Millisecond,
+		MaxTurns:  maxTurns,
+		Timeout:   timeout,
 		ExtraArgs: b.cfg.ExtraArgs,
 		OnTextDelta: func(delta string) {
 			streamer.OnDelta(delta)

@@ -366,11 +366,28 @@ func TestConfigAddsPersist(t *testing.T) {
 	body := w.Body.String()
 	for _, want := range []string{
 		"added", newProj, "user-added", "role-added", "ch-added", "Remove", "Add channel map",
+		"Grok run limits", "maxTurns", "timeoutMs",
 		"Worktree idle cleanup", "worktreeIdleTTLDays", "CI triage", "autoFixCI", "Completion risk paths",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("config page missing %q", want)
 		}
+	}
+
+	// Settings: Grok run limits
+	reqRun := httptest.NewRequest(http.MethodPost, "/config/settings", strings.NewReader(url.Values{
+		"section":   {"run"},
+		"maxTurns":  {"55"},
+		"timeoutMs": {"1200000"},
+	}.Encode()))
+	reqRun.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	wRun := httptest.NewRecorder()
+	h.ServeHTTP(wRun, reqRun)
+	if wRun.Code != http.StatusSeeOther && wRun.Code != http.StatusFound {
+		t.Fatalf("run settings status=%d body=%s", wRun.Code, wRun.Body.String())
+	}
+	if cfg.MaxTurnsValue() != 55 || cfg.TimeoutMsValue() != 1_200_000 {
+		t.Fatalf("run limits turns=%d timeout=%d", cfg.MaxTurnsValue(), cfg.TimeoutMsValue())
 	}
 
 	// Settings: idle TTL
