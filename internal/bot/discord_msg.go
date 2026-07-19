@@ -1,11 +1,14 @@
 package bot
 
 import (
+	"errors"
 	"regexp"
 	"strings"
 
 	"github.com/bwmarrin/discordgo"
 )
+
+var errNoEmbeds = errors.New("no embeds")
 
 // Discord link forms we must preserve end-to-end:
 //   https://host/path?a=1&b=2#frag
@@ -157,6 +160,34 @@ func discordSendReply(s *discordgo.Session, channelID, content string, reference
 		Content:   content,
 		Reference: reference,
 		Flags:     discordgo.MessageFlagsSuppressEmbeds,
+		AllowedMentions: &discordgo.MessageAllowedMentions{
+			Parse: []discordgo.AllowedMentionType{},
+		},
+	})
+}
+
+// discordSendEmbed posts a rich embed. Unlike discordSend, it does not set
+// SuppressEmbeds — that flag would drop custom embeds as well as link unfurls.
+func discordSendEmbed(s *discordgo.Session, channelID string, embeds ...*discordgo.MessageEmbed) (*discordgo.Message, error) {
+	if len(embeds) == 0 {
+		return nil, errNoEmbeds
+	}
+	cleaned := make([]*discordgo.MessageEmbed, 0, len(embeds))
+	for _, e := range embeds {
+		if e == nil {
+			continue
+		}
+		// Strip NULs only; do not run full content sanitize (empty → placeholder).
+		e.Title = strings.ReplaceAll(e.Title, "\x00", "")
+		e.Description = strings.ReplaceAll(e.Description, "\x00", "")
+		e.URL = strings.ReplaceAll(e.URL, "\x00", "")
+		cleaned = append(cleaned, e)
+	}
+	if len(cleaned) == 0 {
+		return nil, errNoEmbeds
+	}
+	return s.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{
+		Embeds: cleaned,
 		AllowedMentions: &discordgo.MessageAllowedMentions{
 			Parse: []discordgo.AllowedMentionType{},
 		},

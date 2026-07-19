@@ -178,6 +178,63 @@ func TestFormatTimeline(t *testing.T) {
 	}
 }
 
+func TestFormatTimelineEmbed(t *testing.T) {
+	info := Info{
+		Number: 12,
+		Owner:  "acoshift",
+		Repo:   "grok-discord",
+		URL:    "https://github.com/acoshift/grok-discord/pull/12",
+	}
+
+	if _, ok := FormatTimelineEmbed(info, nil); ok {
+		t.Fatal("empty events should not be ok")
+	}
+
+	emb, ok := FormatTimelineEmbed(info, []TimelineEvent{
+		{Kind: TimelineApproved},
+		{Kind: TimelineCIGreen, Detail: "✓ 4"},
+	})
+	if !ok {
+		t.Fatal("expected embed")
+	}
+	if emb.Title != "PR event · acoshift/grok-discord#12" {
+		t.Fatalf("title=%q", emb.Title)
+	}
+	if emb.URL != info.URL {
+		t.Fatalf("url=%q", emb.URL)
+	}
+	if emb.Color != timelineColorSuccess {
+		t.Fatalf("color=%#x want success %#x", emb.Color, timelineColorSuccess)
+	}
+	for _, want := range []string{"APPROVED", "CI: **green**", "✓ 4"} {
+		if !strings.Contains(emb.Description, want) {
+			t.Fatalf("missing %q in desc:\n%s", want, emb.Description)
+		}
+	}
+
+	merged, ok := FormatTimelineEmbed(info, []TimelineEvent{{Kind: TimelineMerged}})
+	if !ok || merged.Color != timelineColorMerged {
+		t.Fatalf("merged embed: ok=%v color=%#x", ok, merged.Color)
+	}
+	closed, ok := FormatTimelineEmbed(info, []TimelineEvent{{Kind: TimelineClosed}})
+	if !ok || closed.Color != timelineColorClosed {
+		t.Fatalf("closed embed: ok=%v color=%#x", ok, closed.Color)
+	}
+	changes, ok := FormatTimelineEmbed(info, []TimelineEvent{{Kind: TimelineChangesRequested}})
+	if !ok || changes.Color != timelineColorChanges {
+		t.Fatalf("changes embed: ok=%v color=%#x", ok, changes.Color)
+	}
+
+	// Multi-event: merged wins color priority over success.
+	mixed, ok := FormatTimelineEmbed(info, []TimelineEvent{
+		{Kind: TimelineApproved},
+		{Kind: TimelineMerged},
+	})
+	if !ok || mixed.Color != timelineColorMerged {
+		t.Fatalf("mixed color=%#x want merged", mixed.Color)
+	}
+}
+
 func TestSnapshotFromInfo(t *testing.T) {
 	s := SnapshotFromInfo(Info{
 		State: "OPEN", ReviewDecision: "APPROVED", Checks: "✓ 1",

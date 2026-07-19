@@ -343,6 +343,7 @@ func (b *Bot) applyPRInfo(s *discordgo.Session, threadID string, info ghpr.Info)
 
 // announcePRTimeline posts discrete PR lifecycle events when the poller (or
 // post-task refresh) detects a transition. Quiet on first seed except terminal.
+// Posts as a Discord rich embed (color-coded by event kind).
 func (b *Bot) announcePRTimeline(s *discordgo.Session, threadID string, prev ghpr.Snapshot, info ghpr.Info) {
 	if s == nil || threadID == "" {
 		return
@@ -351,23 +352,39 @@ func (b *Bot) announcePRTimeline(s *discordgo.Session, threadID string, prev ghp
 	if len(events) == 0 {
 		return
 	}
-	note := ghpr.FormatTimeline(info, events)
-	if note == "" {
+	emb, ok := ghpr.FormatTimelineEmbed(info, events)
+	if !ok {
 		return
 	}
 	if ghpr.HasTerminalTimeline(events) {
 		if e2, ok := b.sessions.Get(threadID); ok {
 			e2.NormalizePRs()
 			if e2.AllPRsTerminal() {
-				note += "\nWorktree will be cleaned when this thread is idle (all PRs finished)."
+				emb.Description += "\n\nWorktree will be cleaned when this thread is idle (all PRs finished)."
 			} else if n := len(e2.OpenPRs()); n > 0 {
-				note += fmt.Sprintf("\n%d other PR(s) still open on this thread.", n)
+				emb.Description += fmt.Sprintf("\n\n%d other PR(s) still open on this thread.", n)
 			}
 		}
 	}
-	if _, sendErr := discordSend(s, threadID, note); sendErr != nil {
-		log.Printf("pr-status: timeline thread=%s: %v", threadID, sendErr)
-		return
+	if _, sendErr := discordSendEmbed(s, threadID, &discordgo.MessageEmbed{
+		Title:       emb.Title,
+		Description: emb.Description,
+		URL:         emb.URL,
+		Color:       emb.Color,
+	}); sendErr != nil {
+		// Embed Links may be missing; fall back to plain text with same body.
+		log.Printf("pr-status: timeline embed thread=%s: %v — text fallback", threadID, sendErr)
+		plain := emb.Title
+		if emb.Description != "" {
+			plain += "\n" + emb.Description
+		}
+		if emb.URL != "" && !strings.Contains(plain, emb.URL) {
+			plain += "\n" + emb.URL
+		}
+		if _, textErr := discordSend(s, threadID, plain); textErr != nil {
+			log.Printf("pr-status: timeline thread=%s: %v", threadID, textErr)
+			return
+		}
 	}
 	kinds := make([]string, 0, len(events))
 	for _, ev := range events {

@@ -113,16 +113,49 @@ func checksHadSignal(summary string) bool {
 	return true
 }
 
-// FormatTimeline builds a short Discord message for one or more PR events.
+// Discord embed colors for PR timeline posts.
+const (
+	timelineColorMerged  = 0x9B59B6 // purple — merged
+	timelineColorClosed  = 0x95A5A6 // grey — closed without merge
+	timelineColorChanges = 0xE67E22 // orange — changes requested
+	timelineColorSuccess = 0x57F287 // green — approved / CI green
+	timelineColorDefault = 0x5865F2 // Discord blurple fallback
+)
+
+// TimelineEmbed is Discord-embed-shaped content for a PR lifecycle post.
+// Kept free of discordgo so ghpr stays a pure data package.
+type TimelineEmbed struct {
+	Title       string
+	Description string
+	URL         string
+	Color       int
+}
+
+// FormatTimelineEmbed builds a rich-embed payload for one or more PR events.
+// ok is false when there is nothing to post.
+func FormatTimelineEmbed(info Info, events []TimelineEvent) (TimelineEmbed, bool) {
+	if len(events) == 0 {
+		return TimelineEmbed{}, false
+	}
+	lines := make([]string, 0, len(events))
+	for _, ev := range events {
+		lines = append(lines, "• "+formatTimelineLine(ev))
+	}
+	return TimelineEmbed{
+		Title:       "PR event · " + prLabel(info),
+		Description: strings.Join(lines, "\n"),
+		URL:         strings.TrimSpace(info.URL),
+		Color:       timelineEmbedColor(events),
+	}, true
+}
+
+// FormatTimeline builds a short plain-text Discord message for one or more PR events.
+// Prefer FormatTimelineEmbed for new posts; this remains for tests and fallbacks.
 func FormatTimeline(info Info, events []TimelineEvent) string {
 	if len(events) == 0 {
 		return ""
 	}
-	label := fmt.Sprintf("#%d", info.Number)
-	if info.Owner != "" && info.Repo != "" {
-		label = fmt.Sprintf("%s/%s#%d", info.Owner, info.Repo, info.Number)
-	}
-	lines := []string{fmt.Sprintf("**PR event** · %s", label)}
+	lines := []string{fmt.Sprintf("**PR event** · %s", prLabel(info))}
 	for _, ev := range events {
 		lines = append(lines, "• "+formatTimelineLine(ev))
 	}
@@ -136,6 +169,34 @@ func FormatTimeline(info Info, events []TimelineEvent) string {
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+func prLabel(info Info) string {
+	if info.Owner != "" && info.Repo != "" {
+		return fmt.Sprintf("%s/%s#%d", info.Owner, info.Repo, info.Number)
+	}
+	return fmt.Sprintf("#%d", info.Number)
+}
+
+// timelineEmbedColor picks one color when several events fire in the same poll.
+// Priority: merged > closed > changes requested > success (approved / CI).
+func timelineEmbedColor(events []TimelineEvent) int {
+	has := make(map[TimelineKind]bool, len(events))
+	for _, ev := range events {
+		has[ev.Kind] = true
+	}
+	switch {
+	case has[TimelineMerged]:
+		return timelineColorMerged
+	case has[TimelineClosed]:
+		return timelineColorClosed
+	case has[TimelineChangesRequested]:
+		return timelineColorChanges
+	case has[TimelineApproved], has[TimelineCIGreen]:
+		return timelineColorSuccess
+	default:
+		return timelineColorDefault
+	}
 }
 
 func formatTimelineLine(ev TimelineEvent) string {
