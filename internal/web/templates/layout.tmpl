@@ -4,7 +4,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{.Title}} · Grok Discord</title>
+  <title>{{.Title}} · Grok Work</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
@@ -590,14 +590,14 @@
        hx-inherit="*"
        {{if .SSEPath}}sse-connect="{{.SSEPath}}"{{end}}>
     <header class="app">
-      <div class="brand">Grok Discord <span>· admin</span></div>
+      <div class="brand">Grok Work <span>· admin</span></div>
       <div class="header-end">
         {{if not .IsLogin}}
         <nav>
           <a href="{{route "dashboard"}}" class="{{if .IsDashboard}}active{{end}}">Dashboard</a>
           <a href="{{route "ship"}}" class="{{if .IsShip}}active{{end}}">Ship</a>
           <a href="{{route "issues"}}" class="{{if or .IsIssues .IsLinear}}active{{end}}">Issues</a>
-          <a href="{{route "history"}}" class="{{if .IsHistory}}active{{end}}">History</a>
+          <a href="{{route "sessions"}}" class="{{if .IsSessions}}active{{end}}">Sessions</a>
           <a href="{{route "worktrees"}}" class="{{if .IsWorktrees}}active{{end}}">Worktrees</a>
           <a href="{{route "config"}}" class="{{if .IsConfig}}active{{end}}">Config</a>
         </nav>

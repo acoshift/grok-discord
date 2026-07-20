@@ -334,7 +334,7 @@ func (s *Server) sessionDiffPage(ctx *hime.Context) error {
 	diff, diffErr := ghpr.WorktreeDiffWith(ctx.Context(), s.ghRun(), cwd, base, ghpr.DiffCaps{})
 	d := s.basePage(ctx)
 	d.Title = "Worktree diff · " + threadID
-	d.IsHistory = true
+	d.IsSessions = true
 	d.Project = ent.Project
 	d.ThreadID = threadID
 	d.Diff = diff

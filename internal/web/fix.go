@@ -384,7 +384,7 @@ func (s *Server) sessionPage(ctx *hime.Context) error {
 	}
 	d := s.basePage(ctx)
 	d.Title = "Session · " + threadID
-	d.IsHistory = true
+	d.IsSessions = true
 	d.ThreadID = threadID
 	d.Flash = strings.TrimSpace(ctx.FormValue("ok"))
 	if e := strings.TrimSpace(ctx.FormValue("err")); e != "" {

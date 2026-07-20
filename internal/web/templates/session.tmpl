@@ -1,10 +1,11 @@
 {{define "content"}}
 <h1 id="page-session">Session</h1>
 <p class="sub">
-  <span class="mono">{{.ThreadID}}</span>
+  <a href="{{route "sessions"}}">← Sessions</a>
+  · <span class="mono">{{.ThreadID}}</span>
   {{if .Project}} · <strong>{{.Project}}</strong>{{end}}
   {{if .DiscordURL}} · <a href="{{.DiscordURL}}" target="_blank" rel="noopener">Open in Discord</a>{{end}}
-  · <a href="/history/{{.ThreadID}}">History</a>
+  · <a href="/history/{{.ThreadID}}">Turn log</a>
   · <a href="/sessions/{{.ThreadID}}/diff">Worktree diff</a>
 </p>
 {{if .Flash}}<div class="flash">{{.Flash}}</div>{{end}}

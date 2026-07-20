@@ -78,6 +78,8 @@ func New(cfg *config.Config, sessions *sessionstore.Store, hist *history.Store, 
 		"logout":                  "/logout",
 		"history":                 "/history",
 		"history.thread":          "/history/",
+		"sessions":                "/sessions",
+		"sessions.thread":         "/sessions/",
 		"ship":                    "/ship",
 		"worktrees":               "/worktrees",
 		"worktrees.prune":         "/worktrees/prune",
@@ -124,6 +126,7 @@ func New(cfg *config.Config, sessions *sessionstore.Store, hist *history.Store, 
 	tp.ParseFiles("dashboard", "layout.tmpl", "dashboard.tmpl")
 	tp.ParseFiles("history", "layout.tmpl", "history.tmpl")
 	tp.ParseFiles("history_detail", "layout.tmpl", "history_detail.tmpl")
+	tp.ParseFiles("sessions", "layout.tmpl", "sessions.tmpl")
 	tp.ParseFiles("ship", "layout.tmpl", "ship.tmpl")
 	tp.ParseFiles("worktrees", "layout.tmpl", "worktrees.tmpl")
 	tp.ParseFiles("config", "layout.tmpl", "config.tmpl")
@@ -154,6 +157,9 @@ func New(cfg *config.Config, sessions *sessionstore.Store, hist *history.Store, 
 	mux.Handle("GET /{$}", s.requireAuth(hime.Handler(s.dashboard)))
 	mux.Handle("GET /history", s.requireAuth(hime.Handler(s.historyList)))
 	mux.Handle("GET /history/{threadID}", s.requireAuth(hime.Handler(s.historyDetail)))
+	mux.Handle("GET /sessions", s.requireAuth(hime.Handler(s.sessionsList)))
+	mux.Handle("GET /sessions/{threadID}/diff", s.requireAuth(hime.Handler(s.sessionDiffPage)))
+	mux.Handle("GET /sessions/{threadID}", s.requireAuth(hime.Handler(s.sessionPage)))
 	mux.Handle("GET /ship", s.requireAuth(hime.Handler(s.shipPage)))
 	mux.Handle("GET /worktrees", s.requireAuth(hime.Handler(s.worktreesPage)))
 	mux.Handle("GET /config", s.requireAuth(hime.Handler(s.configPage)))
@@ -164,8 +170,6 @@ func New(cfg *config.Config, sessions *sessionstore.Store, hist *history.Store, 
 	mux.Handle("GET /projects/{project}/linear/{identifier}", s.requireAuth(hime.Handler(s.linearDetail)))
 	mux.Handle("GET /prs/{owner}/{repo}/{n}", s.requireAuth(hime.Handler(s.prDetail)))
 	mux.Handle("GET /prs/{owner}/{repo}/{n}/diff", s.requireAuth(hime.Handler(s.prDiffPage)))
-	mux.Handle("GET /sessions/{threadID}/diff", s.requireAuth(hime.Handler(s.sessionDiffPage)))
-	mux.Handle("GET /sessions/{threadID}", s.requireAuth(hime.Handler(s.sessionPage)))
 	// GitHub writes (PR8–9): always registered; request-time feature + role gates.
 	mux.Handle("POST /projects/{project}/issues/{n}/comments",
 		s.requireFeature("githubWrites", s.requireMember(hime.Handler(s.postIssueComment))))
@@ -240,6 +244,7 @@ type pageData struct {
 	Title       string
 	IsDashboard bool
 	IsHistory   bool
+	IsSessions  bool
 	IsShip      bool
 	IsWorktrees bool
 	IsConfig    bool
@@ -368,6 +373,20 @@ func (s *Server) historyList(ctx *hime.Context) error {
 	d.IsHistory = true
 	d.Threads = threads
 	return s.viewPage(ctx, "history", d)
+}
+
+// sessionsList is the sessions hub: work units from history + sessionstore.
+func (s *Server) sessionsList(ctx *hime.Context) error {
+	threads, err := s.history.List()
+	if err != nil {
+		return ctx.Status(http.StatusInternalServerError).Error("sessions list: " + err.Error())
+	}
+	threads = mergeSessionRows(threads, s.sessions.List())
+	d := s.basePage(ctx)
+	d.Title = "Sessions"
+	d.IsSessions = true
+	d.Threads = threads
+	return s.viewPage(ctx, "sessions", d)
 }
 
 func (s *Server) historyDetail(ctx *hime.Context) error {

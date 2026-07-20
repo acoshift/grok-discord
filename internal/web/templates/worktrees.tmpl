@@ -55,7 +55,7 @@
     <tbody>
       {{range .Worktrees}}
       <tr>
-        <td class="mono"><a href="/history/{{.ThreadID}}">{{.ThreadID}}</a></td>
+        <td class="mono"><a href="/sessions/{{.ThreadID}}">{{.ThreadID}}</a></td>
         <td>{{if .Project}}{{.Project}}{{else}}<span class="muted">—</span>{{end}}</td>
         <td class="mono">{{if .Branch}}{{.Branch}}{{else}}<span class="muted">—</span>{{end}}</td>
         <td class="mono">{{if .LastActiveAt}}{{.LastActiveAt}}{{else}}<span class="muted">—</span>{{end}}</td>

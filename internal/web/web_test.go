@@ -97,6 +97,7 @@ func TestPagesRender(t *testing.T) {
 		{"/", `id="page-dashboard"`},
 		{"/ship", `id="page-ship"`},
 		{"/ship", "Lead digest"},
+		{"/sessions", `id="page-sessions"`},
 		{"/history", `id="page-history"`},
 		{"/worktrees", `id="page-worktrees"`},
 		{"/worktrees", "Prune idle now"},
@@ -122,8 +123,11 @@ func TestPagesRender(t *testing.T) {
 			if !strings.Contains(body, tc.marker) {
 				t.Fatalf("missing marker %q in body (len=%d)", tc.marker, len(body))
 			}
-			if !strings.Contains(body, "Grok Discord") {
-				t.Fatal("missing brand")
+			if !strings.Contains(body, "Grok Work") {
+				t.Fatal("missing Grok Work brand")
+			}
+			if strings.Contains(body, "Grok Discord") {
+				t.Fatal("legacy Grok Discord brand still present in chrome")
 			}
 			// Layout hosts SSE; pages host domain live-regions.
 			// Shell is hx-boosted into #live-root so the SSE socket survives in-app nav.
@@ -278,6 +282,115 @@ func TestPagesRender(t *testing.T) {
 		if !strings.Contains(detail, want) {
 			t.Fatalf("history detail missing %q in %s", want, detail)
 		}
+	}
+}
+
+func TestSessionsHub(t *testing.T) {
+	srv, _, _ := testServer(t)
+	h := srv.Handler()
+
+	// Session-only row (no history turns) must still appear on the hub.
+	if err := srv.sessions.Set("thread-only-sess", sessionstore.Entry{
+		SessionID: "sess-only",
+		Project:   "proj",
+		LastUser:  "bob#1",
+		Goal:      "session without turns",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/sessions", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	for _, want := range []string{
+		`id="page-sessions"`,
+		"Grok Work",
+		`href="/sessions"`,
+		">Sessions<",
+		"/sessions/thread-99",
+		"thread-99",
+		"proj",
+		"alice#0",
+		"do a huge refactor",
+		"/sessions/thread-only-sess",
+		"thread-only-sess",
+		"bob#1",
+		"no turns recorded yet",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("sessions hub missing %q in body (len=%d)", want, len(body))
+		}
+	}
+	// Primary nav: Sessions active; History is not a top-nav work-unit tab.
+	if !strings.Contains(body, `>Sessions<`) {
+		t.Fatal("nav missing Sessions label")
+	}
+	if !strings.Contains(body, `class="active"`) {
+		t.Fatal("expected Sessions nav active class on hub")
+	}
+	if strings.Contains(body, `href="/history">History</a>`) || strings.Contains(body, `href="/history" class="active">History`) {
+		t.Fatal("History must not be primary top-nav work-unit tab")
+	}
+	if strings.Contains(body, "Grok Discord") {
+		t.Fatal("legacy brand in sessions hub")
+	}
+
+	// Detail still works and highlights Sessions.
+	req = httptest.NewRequest(http.MethodGet, "/sessions/thread-99", nil)
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("session detail status=%d body=%s", w.Code, w.Body.String())
+	}
+	detail := w.Body.String()
+	for _, want := range []string{
+		`id="page-session"`,
+		"thread-99",
+		"Grok Work",
+		`href="/sessions"`,
+		"please fix the flaky test",
+	} {
+		if !strings.Contains(detail, want) {
+			t.Fatalf("session detail missing %q", want)
+		}
+	}
+	if strings.Contains(detail, "Grok Discord") {
+		t.Fatal("legacy brand on session detail")
+	}
+}
+
+func TestNavBrandChrome(t *testing.T) {
+	srv, _, _ := testServer(t)
+	h := srv.Handler()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	body := w.Body.String()
+	// Primary nav order markers (labels present as nav links).
+	for _, want := range []string{
+		">Dashboard<",
+		">Ship<",
+		">Issues<",
+		">Sessions<",
+		">Worktrees<",
+		">Config<",
+		"Grok Work",
+		"· Grok Work",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("chrome missing %q", want)
+		}
+	}
+	if strings.Contains(body, "Grok Discord") {
+		t.Fatal("legacy Grok Discord brand")
+	}
+	// History is not a primary nav link.
+	if strings.Contains(body, `>History</a>`) {
+		t.Fatal("History must not appear as primary nav label")
 	}
 }
 

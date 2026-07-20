@@ -104,7 +104,7 @@ func TestAuthOffPagesAndMutate(t *testing.T) {
 func TestAuthOnUnauthenticatedRedirect(t *testing.T) {
 	srv, _, _ := authOnServer(t)
 	h := srv.Handler()
-	for _, path := range []string{"/", "/config", "/history", "/ship", "/worktrees", "/events"} {
+	for _, path := range []string{"/", "/config", "/history", "/sessions", "/ship", "/worktrees", "/events"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, req)

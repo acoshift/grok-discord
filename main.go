@@ -38,7 +38,7 @@ func main() {
 	addr := cfg.ListenAddr()
 	webSrv := web.New(cfg, sessions, hist, b)
 	go func() {
-		log.Printf("bg: web UI listening on http://%s (dashboard, ship, history, worktrees, config)", addr)
+		log.Printf("bg: web UI listening on http://%s (dashboard, ship, sessions, worktrees, config)", addr)
 		if err := webSrv.ListenAndServe(); err != nil {
 			log.Printf("bg: web server stopped: %v", err)
 		}
@@ -65,7 +65,7 @@ func main() {
 	}
 	defer dg.Close()
 
-	fmt.Println("Grok Discord bridge running. Ctrl+C to stop.")
+	fmt.Println("Grok Work bridge running. Ctrl+C to stop.")
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)

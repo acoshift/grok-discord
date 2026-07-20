@@ -1,0 +1,35 @@
+{{define "content"}}
+<h1 id="page-sessions">Sessions</h1>
+<p class="sub">Work units (Discord threads / Grok sessions) with project and turn activity ({{len .Threads}}).</p>
+
+{{if .Threads}}
+<div class="table-scroll" id="sessions-table">
+<table>
+  <thead>
+    <tr>
+      <th>Thread</th>
+      <th>Project</th>
+      <th>Turns</th>
+      <th>Last user</th>
+      <th>Updated</th>
+      <th>Last prompt</th>
+    </tr>
+  </thead>
+  <tbody>
+    {{range .Threads}}
+    <tr>
+      <td class="mono"><a href="/sessions/{{.ThreadID}}">{{.ThreadID}}</a></td>
+      <td>{{if .Project}}{{.Project}}{{else}}<span class="muted">—</span>{{end}}</td>
+      <td>{{.TurnCount}}</td>
+      <td>{{if .LastUser}}{{.LastUser}}{{else}}<span class="muted">—</span>{{end}}</td>
+      <td class="mono">{{if .UpdatedAt}}{{.UpdatedAt}}{{else}}<span class="muted">—</span>{{end}}</td>
+      <td>{{if .LastPrompt}}{{.LastPrompt}}{{else}}<span class="muted">{{if eq .TurnCount 0}}no turns recorded yet{{else}}—{{end}}</span>{{end}}</td>
+    </tr>
+    {{end}}
+  </tbody>
+</table>
+</div>
+{{else}}
+<div class="empty" id="sessions-empty">No sessions yet. Work units appear after Discord or web starts a Grok task.</div>
+{{end}}
+{{end}}
