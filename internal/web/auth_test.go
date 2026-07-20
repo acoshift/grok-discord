@@ -62,7 +62,7 @@ func authOnServer(t *testing.T) (*Server, *config.Config, *FakeDiscordOAuth) {
 		t.Fatal(err)
 	}
 	fake := &FakeDiscordOAuth{CodeToUser: map[string]DiscordUser{
-		"code-admin":  {ID: "admin-1", Username: "admin", GlobalName: "Admin User"},
+		"code-admin":  {ID: "admin-1", Username: "admin", GlobalName: "Admin User", Avatar: "abc123def"},
 		"code-member": {ID: "member-1", Username: "member"},
 		"code-allow":  {ID: "allow-user", Username: "allowed"},
 		"code-deny":   {ID: "stranger", Username: "stranger"},
@@ -208,6 +208,10 @@ func TestAuthOnOAuthCallbackAndAdminMutate(t *testing.T) {
 	if !ok || sess.Role != config.WebRoleAdmin {
 		t.Fatalf("session=%+v ok=%v", sess, ok)
 	}
+	wantAvatar := "https://cdn.discordapp.com/avatars/admin-1/abc123def.png?size=64"
+	if sess.AvatarURL != wantAvatar {
+		t.Fatalf("AvatarURL=%q want %q", sess.AvatarURL, wantAvatar)
+	}
 
 	// Unauthenticated POST rejected.
 	form := url.Values{"section": {"worktree"}, "worktreeIdleTTLDays": {"3"}}
@@ -255,8 +259,39 @@ func TestAuthOnOAuthCallbackAndAdminMutate(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("GET / status=%d", w.Code)
 	}
-	if !strings.Contains(w.Body.String(), "Admin User") {
+	body := w.Body.String()
+	if !strings.Contains(body, "Admin User") {
 		t.Fatal("expected display name in chrome")
+	}
+	if !strings.Contains(body, wantAvatar) {
+		t.Fatal("expected Discord avatar URL in chrome")
+	}
+	if !strings.Contains(body, `class="avatar"`) || !strings.Contains(body, `<img`) {
+		t.Fatal("expected avatar <img> in chrome")
+	}
+}
+
+func TestDiscordAvatarURL(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		id, hash, want string
+	}{
+		{"123", "hash1", "https://cdn.discordapp.com/avatars/123/hash1.png?size=64"},
+		{"123", "a_anim", "https://cdn.discordapp.com/avatars/123/a_anim.gif?size=64"},
+		// (80351110224678912 >> 22) % 6 == 5
+		{"80351110224678912", "", "https://cdn.discordapp.com/embed/avatars/5.png"},
+		{"", "hash", ""},
+		{"not-a-number", "", ""},
+	}
+	for _, tc := range cases {
+		got := discordAvatarURL(tc.id, tc.hash)
+		if got != tc.want {
+			t.Errorf("discordAvatarURL(%q, %q)=%q want %q", tc.id, tc.hash, got, tc.want)
+		}
+	}
+	u := DiscordUser{ID: "99", Avatar: "x"}
+	if u.AvatarURL() != "https://cdn.discordapp.com/avatars/99/x.png?size=64" {
+		t.Fatalf("AvatarURL=%q", u.AvatarURL())
 	}
 }
 

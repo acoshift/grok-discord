@@ -26,6 +26,7 @@ type Session struct {
 	ID            string         `json:"id"`
 	DiscordUserID string         `json:"discordUserId"`
 	DisplayName   string         `json:"displayName"`
+	AvatarURL     string         `json:"avatarUrl,omitempty"`
 	Role          config.WebRole `json:"role"`
 	CSRF          string         `json:"csrf"`
 	ExpiresAt     time.Time      `json:"expiresAt"`
@@ -98,7 +99,7 @@ func (st *sessionStore) saveLocked() error {
 	return os.Rename(tmp, st.path)
 }
 
-func (st *sessionStore) Create(discordUserID, displayName string, role config.WebRole) (*Session, error) {
+func (st *sessionStore) Create(discordUserID, displayName, avatarURL string, role config.WebRole) (*Session, error) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	if st.sessions == nil {
@@ -116,6 +117,7 @@ func (st *sessionStore) Create(discordUserID, displayName string, role config.We
 		ID:            id,
 		DiscordUserID: discordUserID,
 		DisplayName:   displayName,
+		AvatarURL:     avatarURL,
 		Role:          role,
 		CSRF:          csrf,
 		ExpiresAt:     time.Now().Add(sessionTTL),

@@ -24,7 +24,7 @@ func (s *Server) LoginAs(discordUserID, displayName string, role config.WebRole)
 	if s.webSessions == nil {
 		return "", "", nil
 	}
-	sess, err := s.webSessions.Create(discordUserID, displayName, role)
+	sess, err := s.webSessions.Create(discordUserID, displayName, "", role)
 	if err != nil {
 		return "", "", err
 	}
@@ -300,7 +300,7 @@ func (s *Server) oauthDiscordCallback(ctx *hime.Context) error {
 		s.auditLogin(user.ID, "", false, "not authorized")
 		return ctx.RedirectTo("login", map[string]string{"err": "not authorized for this Grok Work instance"})
 	}
-	sess, err := s.webSessions.Create(user.ID, user.DisplayName(), role)
+	sess, err := s.webSessions.Create(user.ID, user.DisplayName(), user.AvatarURL(), role)
 	if err != nil {
 		s.auditLogin(user.ID, string(role), false, "session create failed")
 		return ctx.Status(http.StatusInternalServerError).Error("session: " + err.Error())

@@ -300,6 +300,7 @@ type pageData struct {
 	UserName    string
 	UserRole    string
 	UserID      string
+	UserAvatar  string // Discord CDN avatar URL; empty → letter fallback
 	LoginNext   string
 	// Workflow read UI (PR4–7)
 	Project       string
@@ -364,6 +365,7 @@ func (s *Server) basePage(ctx *hime.Context) pageData {
 		d.CSRF = sess.CSRF
 		d.UserName = sess.DisplayName
 		d.UserID = sess.DiscordUserID
+		d.UserAvatar = sess.AvatarURL
 		d.UserRole = string(sess.Role)
 		d.IsAdmin = config.RoleAtLeast(sess.Role, config.WebRoleAdmin)
 		// Gate UI by role (handlers still enforce).

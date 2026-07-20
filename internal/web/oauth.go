@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -16,6 +17,7 @@ type DiscordUser struct {
 	ID         string `json:"id"`
 	Username   string `json:"username"`
 	GlobalName string `json:"global_name"`
+	Avatar     string `json:"avatar"` // hash; empty when using default avatar
 }
 
 // DisplayName prefers global_name, then username.
@@ -24,6 +26,34 @@ func (u DiscordUser) DisplayName() string {
 		return g
 	}
 	return strings.TrimSpace(u.Username)
+}
+
+// AvatarURL is the Discord CDN URL for this user's profile image.
+// Custom avatars use the hash; otherwise the default embed avatar for the user id.
+func (u DiscordUser) AvatarURL() string {
+	return discordAvatarURL(u.ID, u.Avatar)
+}
+
+// discordAvatarURL builds a CDN URL from a Discord user id and optional avatar hash.
+func discordAvatarURL(userID, avatarHash string) string {
+	userID = strings.TrimSpace(userID)
+	avatarHash = strings.TrimSpace(avatarHash)
+	if userID == "" {
+		return ""
+	}
+	if avatarHash != "" {
+		ext := "png"
+		if strings.HasPrefix(avatarHash, "a_") {
+			ext = "gif"
+		}
+		return fmt.Sprintf("https://cdn.discordapp.com/avatars/%s/%s.%s?size=64", userID, avatarHash, ext)
+	}
+	// Default avatar index for the modern username system: (snowflake >> 22) % 6.
+	id, err := strconv.ParseUint(userID, 10, 64)
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("https://cdn.discordapp.com/embed/avatars/%d.png", (id>>22)%6)
 }
 
 // DiscordOAuth exchanges codes and fetches the current user.

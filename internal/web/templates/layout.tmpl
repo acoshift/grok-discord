@@ -299,6 +299,12 @@
       font-size: 0.78rem;
       font-weight: 600;
       text-transform: uppercase;
+      object-fit: cover;
+    }
+    .side-user img.avatar {
+      padding: 0;
+      background: transparent;
+      text-transform: none;
     }
     .side-user-meta { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
     .side-user-name {
@@ -1054,7 +1060,11 @@
         {{if .AuthEnabled}}
           {{if .UserName}}
           <div class="side-user" title="{{.UserID}} · {{.UserRole}}">
+            {{if .UserAvatar}}
+            <img class="avatar" src="{{.UserAvatar}}" alt="" width="28" height="28" referrerpolicy="no-referrer" decoding="async">
+            {{else}}
             <span class="avatar" aria-hidden="true">{{printf "%.1s" .UserName}}</span>
+            {{end}}
             <span class="side-user-meta">
               <span class="side-user-name">{{.UserName}}</span>
               <span class="side-user-role">{{.UserRole}}</span>
