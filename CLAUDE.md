@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-**Grok Work** (`grokwork`): a single Go process that bridges Discord and the `grok` CLI. Users tag `@Grok <task>` in a mapped channel; the bot runs Grok Build headless (`grok -p … --cwd <project>`) against a local checkout and streams the reply into a Discord thread. It also serves a private-network admin web UI (OAuth-optional; dashboard, ship, issues, sessions, worktrees, config) on `:8787`.
+**Grok Work** (`grokwork`): a single Go process that bridges Discord and the `grok` CLI. Users tag `@Grok <task>` in a mapped channel; the bot runs Grok Build headless (`grok -p … --cwd <project>`) against a local checkout and streams the reply into a Discord thread. It also serves a private-network admin web UI (OAuth-optional; dashboard, ship, issues, commits, sessions, worktrees, config + per-project settings) on `:8787`.
 
 Module: `github.com/acoshift/grokwork`. Binary: `grokwork`. Env: `GROK_WORK_*` only.
 
@@ -17,6 +17,11 @@ go vet ./...                          # vet
 go test ./...                         # full test suite (stdlib testing only, no external deps)
 go test ./internal/bot -run TestName  # single test
 go run .                              # run (needs config.json, see below)
+
+# Visual review of web UI changes: real server on :18787 with seeded demo data.
+# DELAY_MS adds artificial latency so loading states are observable.
+GROKWORK_WEB_PREVIEW=1 [GROKWORK_WEB_PREVIEW_DELAY_MS=800] \
+  go test ./internal/web -run TestPreviewServer -timeout 0
 ```
 
 Running the bot requires `config.json` (copy `config.example.json`). Go 1.26.5+.
@@ -56,10 +61,20 @@ A task then flows through `handleTask` (async):
 - `internal/grokrun` — execs `grok -p`; prompt passed via temp file + `--verbatim` (never inline, to survive `#`/`?`/`&`); `json` vs `streaming-json` output chosen by whether streaming callbacks are set.
 - `internal/sessionstore` — `data/sessions.json`; `Entry` per thread (session ID, cwd, branch, owner/co-owners, goal, tracked PRs). Multi-PR list `PRs` is the source of truth; legacy single-PR fields are mirrored for old data — call `NormalizePRs()` before reading PR state. Mutate via `Patch` (load-apply-save under one lock).
 - `internal/gitworktree` — only branches matching `grok/discord/` prefix may ever be deleted (`IsManagedBranch`); cleanup triggers are PR merged/closed (all tracked PRs terminal) and idle TTL (daily sweep, skips running/queued threads).
-- `internal/ghpr` — `gh` CLI wrapper for PR state/checks/reviews.
-- `internal/config` — mutable at runtime: the web config page edits and persists `config.json` while the bot runs, hence the RWMutex + `Snapshot()` accessors. Tri-state fields use pointers (`*bool`, `*int`) to distinguish "unset → default" from explicit false/0 (e.g. `Yolo` nil means true, `WorktreeIdleTTLDays` nil means 30 but 0 disables) — preserve this pattern when adding config.
-- `internal/web` — hime (v1.6+ htmx helpers: `View("page#fragment")`, `HTMXAwareRedirect`, `NoCache`) + embedded `html/template` + stdlib SSE. Live-region endpoints render named template defines; full pages use the layout root. Shutdown is tuned to not wait for open SSE streams (`GraceTimeout = 1ms`); `live_test.go` boots the real TCP listener.
+- `internal/ghpr` — `gh` CLI wrapper (PR state/checks/reviews, issue read/create) plus `git log`/`show` parsing for the commits browser and diff rendering.
+- `internal/commitreview` — read-only Grok review of a single commit (no Discord session, no worktree): job store under `data/commit-reviews/`, structured findings parsed from the reply, one GitHub issue filed per finding via `gh`.
+- `internal/config` — mutable at runtime: the web config pages edit and persist `config.json` while the bot runs, hence the RWMutex + `Snapshot()` accessors. Tri-state fields use pointers (`*bool`, `*int`) to distinguish "unset → default" from explicit false/0 (e.g. `Yolo` nil means true, `WorktreeIdleTTLDays` nil means 30 but 0 disables) — preserve this pattern when adding config.
+- `internal/web` — hime (v1.6+ htmx helpers: `View("page#fragment")`, `HTMXAwareRedirect`, `NoCache`) + embedded `html/template` + stdlib SSE. Live-region endpoints render named template defines; full pages use the layout root. Shutdown is tuned to not wait for open SSE streams (`GraceTimeout = 1ms`); `live_test.go` boots the real TCP listener. See "Web UI conventions" below before touching templates.
+- `internal/audit` — JSONL audit log (daily files under `data/audit/`) for web-initiated mutations (config writes, prunes, PR actions, commit reviews).
 - `internal/history` — per-turn JSON log per thread under `data/history/`, feeds the web history views.
+
+### Web UI conventions (`internal/web/templates`)
+
+- `layout.tmpl` owns the entire design system: Grok monochrome HSL tokens (light default, dark via `prefers-color-scheme`), sidebar shell, all component CSS, and the shared scripts (SSE status, nav sync, copy buttons, `data-autosubmit` selects, page-loader bar, submit-button double-click guard). Pages contain content only.
+- **SPA shell contract:** `hx-boost` on the shell swaps only `#live-root`, so the SSE `EventSource` survives navigation. htmx runs with `disableInheritance=true` + `hx-inherit="*"` on the shell. SSE-refreshed regions must keep exactly `class="live-region"` with `hx-target="this" hx-select="unset"` — anything else lets a partial wipe the page.
+- **`web_test.go` pins markup byte-for-byte.** Notably: every page needs its `id="page-*"` marker; nav anchors must render `class="{{if .IsX}}active{{end}}">Label</a>` (class attribute last, bare label — `assertNavActive` matches the contiguous string); partials must not contain layout chrome (`<nav>`, `sse-status`, the htmx script). Check the tests before renaming anything in a template.
+- Per-project settings live at `/config/projects/{name}`; project-scoped POSTs redirect back there via `projectConfigRedirect`, and channel map forms submitted from that page carry `return_to=project`. The `/config` hub keeps only global settings.
+- Local project paths may appear in the web UI (private network) but must never leak into Discord messages.
 
 ### Discord-facing conventions
 
