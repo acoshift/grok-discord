@@ -53,9 +53,7 @@ type Config struct {
 	DiscordClientID string `json:"discordClientId,omitempty"`
 	// DiscordClientSecret is the OAuth2 client secret for web login (never log).
 	// Prefer env DISCORD_CLIENT_SECRET / GROK_WORK_DISCORD_CLIENT_SECRET.
-	DiscordClientSecret string `json:"discordClientSecret,omitempty"`
-	AllowedUserIDs      []string          `json:"allowedUserIds,omitempty"`
-	AllowedRoleIDs      []string          `json:"allowedRoleIds,omitempty"`
+	DiscordClientSecret string            `json:"discordClientSecret,omitempty"`
 	Projects            ProjectsMap       `json:"projects"`
 	Channels            map[string]string `json:"channels"` // channel ID → project name
 	GrokBin             string            `json:"grokBin"`
@@ -97,12 +95,15 @@ type Config struct {
 	// BoardDigestChannel is an optional Discord channel ID for the nightly team board post.
 	// Empty/omitted disables the digest.
 	BoardDigestChannel string `json:"boardDigestChannel,omitempty"`
+	// ResumeActiveRuns enables durable run journals and crash recovery.
+	// nil/omitted → true. Explicit false disables (boot still purges leftover journals).
+	ResumeActiveRuns *bool `json:"resumeActiveRuns,omitempty"`
+	// ShutdownTimeoutMs is how long Bot.Stop waits for drains (default 15000).
+	ShutdownTimeoutMs int `json:"shutdownTimeoutMs,omitempty"`
 
-	mu           sync.RWMutex
-	AllowedUsers map[string]struct{} `json:"-"`
-	AllowedRoles map[string]struct{} `json:"-"`
-	DataDir      string              `json:"-"`
-	ConfigPath   string              `json:"-"`
+	mu         sync.RWMutex
+	DataDir    string `json:"-"`
+	ConfigPath string `json:"-"`
 
 	catalogMu    sync.Mutex
 	catalogCache map[string]catalogCacheEntry
@@ -149,6 +150,8 @@ type Snapshot struct {
 	RiskyPathUseDefault bool   // true when riskyPathGlobs is unset (nil)
 	BoardStaleDays      int    // effective (default 3)
 	BoardDigestChannel  string // empty = digest disabled
+	ResumeActiveRuns    bool   // effective (default true)
+	ShutdownTimeoutMs   int    // effective (default 15000 when unset)
 	ClientID            string
 	InviteURL           string
 	InviteError         string
@@ -161,6 +164,37 @@ type Snapshot struct {
 	// Feature flags for UI (true only when webAuth enabled + feature bit).
 	FeatureGitHubWrites bool
 	FeatureMerge        bool
+}
+
+// DefaultShutdownTimeoutMs is used when shutdownTimeoutMs is unset/invalid.
+const DefaultShutdownTimeoutMs = 15000
+
+// ResumeActiveRunsEnabled reports whether crash-safe resume is on (nil → true).
+func (c *Config) ResumeActiveRunsEnabled() bool {
+	if c == nil || c.ResumeActiveRuns == nil {
+		return true
+	}
+	return *c.ResumeActiveRuns
+}
+
+// ShutdownTimeoutMsValue returns the Stop drain wait in ms (default 15000).
+func (c *Config) ShutdownTimeoutMsValue() int {
+	if c == nil || c.ShutdownTimeoutMs <= 0 {
+		return DefaultShutdownTimeoutMs
+	}
+	return c.ShutdownTimeoutMs
+}
+
+// SetResumeActiveRuns sets the resume flag and persists.
+func (c *Config) SetResumeActiveRuns(enabled bool) error {
+	if c == nil {
+		return fmt.Errorf("nil config")
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	v := enabled
+	c.ResumeActiveRuns = &v
+	return c.saveLocked()
 }
 
 func (c *Config) YoloEnabled() bool {
@@ -375,11 +409,6 @@ func Load() (*Config, error) {
 		c.SummarizeTimeoutMs = 45_000
 	}
 
-	// Legacy root allowlists are kept only long enough to migrate into projects.
-	c.AllowedUserIDs = cleanIDList(c.AllowedUserIDs)
-	c.AllowedRoleIDs = cleanIDList(c.AllowedRoleIDs)
-	c.AllowedUsers = toSet(c.AllowedUserIDs)
-	c.AllowedRoles = toSet(c.AllowedRoleIDs)
 	c.ConfigPath = path
 	c.DataDir = filepath.Join(filepath.Dir(path), "data")
 
@@ -389,18 +418,6 @@ func Load() (*Config, error) {
 	}
 	if err := c.ValidatePreferredChannels(); err != nil {
 		return nil, err
-	}
-
-	// One-shot: copy root allowlist into empty projects, then clear root lists.
-	hadGlobal := len(c.AllowedUserIDs) > 0 || len(c.AllowedRoleIDs) > 0
-	n, err := c.MigrateGlobalAllowlistToProjects()
-	if err != nil {
-		return nil, fmt.Errorf("migrate global allowlist to projects: %w", err)
-	}
-	if n > 0 {
-		fmt.Fprintf(os.Stderr, "[info] migrated global allowlist into %d project(s); global allowlist cleared\n", n)
-	} else if hadGlobal {
-		fmt.Fprintf(os.Stderr, "[info] cleared legacy global allowlist (projects already had members)\n")
 	}
 
 	return &c, nil
@@ -423,8 +440,6 @@ func (c *Config) saveLocked() error {
 		DiscordToken         string            `json:"discordToken"`
 		DiscordClientID      string            `json:"discordClientId,omitempty"`
 		DiscordClientSecret  string            `json:"discordClientSecret,omitempty"`
-		AllowedUserIDs       []string          `json:"allowedUserIds,omitempty"`
-		AllowedRoleIDs       []string          `json:"allowedRoleIds,omitempty"`
 		Projects             ProjectsMap       `json:"projects"`
 		Channels             map[string]string `json:"channels"`
 		GrokBin              string            `json:"grokBin"`
@@ -447,12 +462,12 @@ func (c *Config) saveLocked() error {
 		AutoFixCIMax         int               `json:"autoFixCIMax,omitempty"`
 		BoardStaleDays       *int              `json:"boardStaleDays,omitempty"`
 		BoardDigestChannel   string            `json:"boardDigestChannel,omitempty"`
+		ResumeActiveRuns     *bool             `json:"resumeActiveRuns,omitempty"`
+		ShutdownTimeoutMs    int               `json:"shutdownTimeoutMs,omitempty"`
 	}{
 		DiscordToken:         c.DiscordToken,
 		DiscordClientID:      c.DiscordClientID,
 		DiscordClientSecret:  c.DiscordClientSecret,
-		AllowedUserIDs:       slices.Clone(c.AllowedUserIDs),
-		AllowedRoleIDs:       slices.Clone(c.AllowedRoleIDs),
 		Projects:             cloneProjectsMap(c.Projects),
 		Channels:             cloneStringMap(c.Channels),
 		GrokBin:              c.GrokBin,
@@ -475,6 +490,8 @@ func (c *Config) saveLocked() error {
 		AutoFixCIMax:         c.AutoFixCIMax,
 		BoardStaleDays:       cloneIntPtr(c.BoardStaleDays),
 		BoardDigestChannel:   c.BoardDigestChannel,
+		ResumeActiveRuns:     cloneBoolPtr(c.ResumeActiveRuns),
+		ShutdownTimeoutMs:    c.ShutdownTimeoutMs,
 	}
 	raw, err := json.MarshalIndent(out, "", "  ")
 	if err != nil {
@@ -779,10 +796,17 @@ func (c *Config) Snapshot() Snapshot {
 		RiskyPathUseDefault: riskyDefault,
 		BoardStaleDays:      boardStale,
 		BoardDigestChannel:  strings.TrimSpace(c.BoardDigestChannel),
-		InvitePermissions:   BotInvitePermissions,
-		WebAuthEnabled:      c.WebAuth != nil && c.WebAuth.Enabled,
-		DiscordGuildID:      strings.TrimSpace(c.DiscordGuildID),
-		WebMergeMethod:      c.webMergeMethodLocked(),
+		ResumeActiveRuns:    c.ResumeActiveRuns == nil || *c.ResumeActiveRuns,
+		ShutdownTimeoutMs: func() int {
+			if c.ShutdownTimeoutMs <= 0 {
+				return DefaultShutdownTimeoutMs
+			}
+			return c.ShutdownTimeoutMs
+		}(),
+		InvitePermissions: BotInvitePermissions,
+		WebAuthEnabled:    c.WebAuth != nil && c.WebAuth.Enabled,
+		DiscordGuildID:    strings.TrimSpace(c.DiscordGuildID),
+		WebMergeMethod:    c.webMergeMethodLocked(),
 	}
 	// Features need WebAuthEnabled without re-locking — compute inline.
 	if c.WebAuth != nil && c.WebAuth.Enabled {
@@ -879,6 +903,14 @@ func cloneStringMap(m map[string]string) map[string]string {
 }
 
 func cloneIntPtr(p *int) *int {
+	if p == nil {
+		return nil
+	}
+	v := *p
+	return &v
+}
+
+func cloneBoolPtr(p *bool) *bool {
 	if p == nil {
 		return nil
 	}

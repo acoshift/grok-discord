@@ -41,7 +41,7 @@ cp config.example.json config.json
 |--------|---------|
 | `discordToken` | Bot token (or `DISCORD_BOT_TOKEN` env) |
 | `discordClientId` | Optional application/client ID for the install URL (decoded from the token when empty) |
-| `projects.<name>.allowedUserIds` / `allowedRoleIds` | Per-project Discord allowlist (fail-closed when both empty). Legacy root `allowedUserIds`/`allowedRoleIds` are migrated into empty projects on load, then cleared. |
+| `projects.<name>.allowedUserIds` / `allowedRoleIds` | Per-project Discord allowlist (fail-closed when both empty). |
 | `allowedRoleIds` | Optional role allowlist |
 | `projects` | Name → **absolute** path string, or object `{ "path", "github", "linear", "discordChannelId", "discordGuildId" }` |
 | `channels` | Discord channel ID → project name (**required**; only way to select a project) |
@@ -50,6 +50,7 @@ cp config.example.json config.json
 | `summarizeTimeoutMs` | Timeout for the title summary call (default 45000) |
 | `worktreeIsolation` | Per-thread git worktree under `data/worktrees/` (default true; non-git projects use main cwd) |
 | `worktreeIdleTTLDays` | Days of inactivity before pruning idle worktrees (default `30`; `0` disables). Editable on the Config page |
+| `resumeActiveRuns` | Persist in-flight runs under `data/runs/` and auto-resume after restart (default `true`). Editable on the Config page |
 | `autoFixCI` / `autoFixCIMax` | Auto-queue CI fixes when checks fail (default off; max attempts per PR, default 2) |
 | `boardStaleDays` | Days without session activity before `/board` lists a thread as **stale** (default `3`). Editable on the Config page |
 | `boardDigestChannel` | Optional Discord channel ID for a nightly team board post (empty = disabled). Editable on the Config page |

@@ -110,8 +110,6 @@ func TestLoadStringProjectsStillWorks(t *testing.T) {
 	cfgPath := filepath.Join(dir, "config.json")
 	raw := []byte(`{
 		"discordToken": "tok",
-		"allowedUserIds": ["u1"],
-		"allowedRoleIds": [],
 		"projects": { "p": "` + proj + `" },
 		"channels": { "c1": "p" }
 	}`)

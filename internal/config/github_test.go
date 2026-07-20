@@ -202,7 +202,6 @@ func TestCatalogCacheNoRace(t *testing.T) {
 	}
 	// Allow saveLocked to write known schema fields.
 	cfg.DiscordToken = "tok"
-	cfg.AllowedUserIDs = []string{}
 	cfg.Channels = map[string]string{}
 
 	run := func(ctx context.Context, dir, name string, args ...string) ([]byte, error) {
@@ -239,13 +238,11 @@ func TestSetProjectGitHubAndChannel(t *testing.T) {
 	_ = os.MkdirAll(proj, 0o755)
 	cfgPath := filepath.Join(dir, "config.json")
 	cfg := &Config{
-		DiscordToken:   "tok",
-		AllowedUserIDs: []string{"u"},
-		AllowedUsers:   map[string]struct{}{"u": {}},
-		Projects:       PathProjects(map[string]string{"p": proj}),
-		Channels:       map[string]string{"ch1": "p"},
-		ConfigPath:     cfgPath,
-		DataDir:        filepath.Join(dir, "data"),
+		DiscordToken: "tok",
+		Projects:     PathProjects(map[string]string{"p": proj}),
+		Channels:     map[string]string{"ch1": "p"},
+		ConfigPath:   cfgPath,
+		DataDir:      filepath.Join(dir, "data"),
 	}
 	if err := cfg.SetProjectGitHubRepos("p", []GitHubRepoRef{{Owner: "acme", Repo: "app"}}); err != nil {
 		t.Fatal(err)

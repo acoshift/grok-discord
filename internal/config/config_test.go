@@ -17,12 +17,15 @@ func TestAddProjectUserRolePersistAndRuntime(t *testing.T) {
 	}
 	cfgPath := filepath.Join(dir, "config.json")
 	initial := map[string]any{
-		"discordToken":   "test-token",
-		"allowedUserIds": []string{"user-1"},
-		"allowedRoleIds": []string{},
-		"projects":       map[string]string{"existing": projDir},
-		"channels":       map[string]string{"ch1": "existing"},
-		"httpListen":     "127.0.0.1:9876",
+		"discordToken": "test-token",
+		"projects": map[string]any{
+			"existing": map[string]any{
+				"path":           projDir,
+				"allowedUserIds": []string{"user-1"},
+			},
+		},
+		"channels":   map[string]string{"ch1": "existing"},
+		"httpListen": "127.0.0.1:9876",
 	}
 	raw, err := json.MarshalIndent(initial, "", "  ")
 	if err != nil {
@@ -46,10 +49,7 @@ func TestAddProjectUserRolePersistAndRuntime(t *testing.T) {
 		t.Fatalf("ListenAddr = %q, want 127.0.0.1:9876", cfg.ListenAddr())
 	}
 	if !cfg.AccessAllowed("existing", "user-1", nil) {
-		t.Fatal("expected user-1 allowed on existing project after migrate")
-	}
-	if len(cfg.AllowedUserIDs) != 0 {
-		t.Fatalf("global allowlist should be cleared after migrate: %v", cfg.AllowedUserIDs)
+		t.Fatal("expected user-1 allowed on existing project")
 	}
 
 	newProj := filepath.Join(dir, "newproj")
@@ -183,11 +183,9 @@ func TestAddProjectUserRolePersistAndRuntime(t *testing.T) {
 
 func TestAddProjectValidation(t *testing.T) {
 	cfg := &Config{
-		Projects:     ProjectsMap{},
-		Channels:     map[string]string{},
-		AllowedUsers: map[string]struct{}{},
-		AllowedRoles: map[string]struct{}{},
-		ConfigPath:   filepath.Join(t.TempDir(), "config.json"),
+		Projects:   ProjectsMap{},
+		Channels:   map[string]string{},
+		ConfigPath: filepath.Join(t.TempDir(), "config.json"),
 	}
 	if err := cfg.AddProject("", "/tmp/x"); err == nil {
 		t.Fatal("expected error for empty name")
@@ -246,8 +244,7 @@ func TestSetAutoFixCIAndRiskyGlobs(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
 	if err := os.WriteFile(path, []byte(`{
-		"discordToken":"t","allowedUserIds":["u"],
-		"projects":{"p":"/tmp"},"channels":{"c":"p"}
+		"discordToken":"t",		"projects":{"p":"/tmp"},"channels":{"c":"p"}
 	}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -262,12 +259,10 @@ func TestSetAutoFixCIAndRiskyGlobs(t *testing.T) {
 	// Build config directly if Load fails on path checks.
 	if cfg == nil || err != nil {
 		cfg = &Config{
-			DiscordToken:   "t",
-			AllowedUserIDs: []string{"u"},
-			Projects:       PathProjects(map[string]string{"p": dir}),
-			Channels:       map[string]string{"c": "p"},
-			ConfigPath:     path,
-			AllowedUsers:   map[string]struct{}{"u": {}},
+			DiscordToken: "t",
+			Projects:     PathProjects(map[string]string{"p": dir}),
+			Channels:     map[string]string{"c": "p"},
+			ConfigPath:   path,
 		}
 	}
 
@@ -452,6 +447,38 @@ func TestBoardSettings(t *testing.T) {
 	}
 	if parsed.BoardStaleDays == nil || *parsed.BoardStaleDays != 3 {
 		t.Fatalf("disk stale=%v", parsed.BoardStaleDays)
+	}
+}
+
+func TestResumeActiveRuns(t *testing.T) {
+	cfg := &Config{
+		Projects:   ProjectsMap{},
+		Channels:   map[string]string{},
+		ConfigPath: filepath.Join(t.TempDir(), "config.json"),
+	}
+	if !cfg.ResumeActiveRunsEnabled() {
+		t.Fatal("nil should default true")
+	}
+	if !cfg.Snapshot().ResumeActiveRuns {
+		t.Fatal("snapshot default true")
+	}
+	if err := cfg.SetResumeActiveRuns(false); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ResumeActiveRunsEnabled() {
+		t.Fatal("explicit false")
+	}
+	if cfg.Snapshot().ResumeActiveRuns {
+		t.Fatal("snapshot false")
+	}
+	if err := cfg.SetResumeActiveRuns(true); err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.ResumeActiveRunsEnabled() {
+		t.Fatal("explicit true")
+	}
+	if cfg.ShutdownTimeoutMsValue() != DefaultShutdownTimeoutMs {
+		t.Fatalf("default shutdown ms=%d", cfg.ShutdownTimeoutMsValue())
 	}
 }
 

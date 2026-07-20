@@ -40,24 +40,28 @@ func TestPreviewServer(t *testing.T) {
 	cfg := &config.Config{
 		DiscordToken:    "tok",
 		DiscordClientID: "424242424242424242",
-		AllowedUserIDs:  []string{"111111111111111111", "222222222222222222"},
-		AllowedRoleIDs:  []string{"333333333333333333"},
-		Projects: config.PathProjects(map[string]string{
-			"webapp": mkProj("webapp"),
-			"api":    mkProj("api"),
-		}),
+		Projects: config.ProjectsMap{
+			"webapp": {
+				Path:           mkProj("webapp"),
+				AllowedUserIDs: []string{"111111111111111111", "222222222222222222"},
+				AllowedRoleIDs: []string{"333333333333333333"},
+			},
+			"api": {
+				Path:           mkProj("api"),
+				AllowedUserIDs: []string{"111111111111111111", "222222222222222222"},
+				AllowedRoleIDs: []string{"333333333333333333"},
+			},
+		},
 		Channels: map[string]string{
 			"900000000000000001": "webapp",
 			"900000000000000002": "api",
 		},
-		AllowedUsers: map[string]struct{}{"111111111111111111": {}, "222222222222222222": {}},
-		AllowedRoles: map[string]struct{}{"333333333333333333": {}},
-		GrokBin:      "grok",
-		MaxTurns:     40,
-		TimeoutMs:    1800000,
-		HTTPListen:   "127.0.0.1:18787",
-		ConfigPath:   filepath.Join(dir, "config.json"),
-		DataDir:      filepath.Join(dir, "data"),
+		GrokBin:    "grok",
+		MaxTurns:   40,
+		TimeoutMs:  1800000,
+		HTTPListen: "127.0.0.1:18787",
+		ConfigPath: filepath.Join(dir, "config.json"),
+		DataDir:    filepath.Join(dir, "data"),
 	}
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)

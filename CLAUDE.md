@@ -81,4 +81,4 @@ A task then flows through `handleTask` (async):
 - Message cap is 1900 chars (`maxMsg`); long output is chunked/sealed.
 - Local project paths must never leak into Discord messages.
 - Ownership: first `@Grok` author owns the thread; `/cancel` and `/reset` require owner, co-owner, or a Discord mod (Admin / Manage Messages / Manage Threads); anyone on that **project’s** allowlist may queue tasks.
-- Project members: `projects.<name>.allowedUserIds` / `allowedRoleIds`. Web UI filters projects by user ID membership (admins see all). Legacy root allowlists migrate into empty projects on load.
+- Project members: `projects.<name>.allowedUserIds` / `allowedRoleIds`. Web UI filters projects by user ID membership (admins see all).
