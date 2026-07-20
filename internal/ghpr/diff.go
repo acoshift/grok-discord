@@ -100,6 +100,11 @@ func WorktreeDiffWith(ctx context.Context, run Runner, cwd, baseRef string, caps
 	if run == nil {
 		run = defaultRunner
 	}
+	cwd = strings.TrimSpace(cwd)
+	if cwd == "" {
+		// Empty Dir would make the process cwd the git root (often the bot repo).
+		return Diff{}, fmt.Errorf("empty worktree path")
+	}
 	baseRef = strings.TrimSpace(baseRef)
 	if baseRef == "" {
 		baseRef = "HEAD"

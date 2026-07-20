@@ -13,6 +13,7 @@ import (
 	"github.com/acoshift/grokwork/internal/ghpr"
 	"github.com/acoshift/grokwork/internal/gitworktree"
 	"github.com/acoshift/grokwork/internal/linear"
+	"github.com/acoshift/grokwork/internal/sessionstore"
 )
 
 // ghRun returns the injectable Runner (tests set s.ghRunner).
@@ -318,28 +319,30 @@ func (s *Server) sessionDiffPage(ctx *hime.Context) error {
 	if !ok {
 		return ctx.Status(http.StatusNotFound).Error("unknown session/thread")
 	}
-	cwd := strings.TrimSpace(ent.Cwd)
-	// Heal stale absolute worktree paths after dataDir rename (grok-discord → grokwork).
-	if path, onDisk := gitworktree.ResolveSessionWorktreePath(s.cfg.DataDir, ent.Project, threadID, ent.Cwd, ent.MainCwd); onDisk {
-		cwd = path
-	} else if cwd == "" {
-		if p, ok := s.cfg.ProjectPath(ent.Project); ok {
-			cwd = p
-		}
-	}
+	cwd, project := s.resolveSessionDiffCwd(ent, threadID)
 	base := strings.TrimSpace(ctx.FormValue("base"))
 	if base == "" {
 		base = "HEAD"
-		// prefer main branch merge-base style: origin/main if set
-		if ent.MainCwd != "" {
+		// Prefer branch-vs-main when we have a worktree or main checkout path.
+		mainCwd := strings.TrimSpace(ent.MainCwd)
+		if mainCwd == "" && project != "" {
+			mainCwd, _ = s.cfg.ProjectPath(project)
+		}
+		if mainCwd != "" || (cwd != "" && cwd != mainCwd) {
 			base = "origin/main"
 		}
 	}
-	diff, diffErr := ghpr.WorktreeDiffWith(ctx.Context(), s.ghRun(), cwd, base, ghpr.DiffCaps{})
+	var diff ghpr.Diff
+	var diffErr error
+	if cwd == "" {
+		diffErr = fmt.Errorf("no git worktree found for this session (project=%q)", project)
+	} else {
+		diff, diffErr = ghpr.WorktreeDiffWith(ctx.Context(), s.ghRun(), cwd, base, ghpr.DiffCaps{})
+	}
 	d := s.basePage(ctx)
 	d.Title = "Worktree diff · " + threadID
 	d.IsSessions = true
-	d.Project = ent.Project
+	d.Project = project
 	d.ThreadID = threadID
 	d.Diff = diff
 	d.DiffBase = base
@@ -347,6 +350,46 @@ func (s *Server) sessionDiffPage(ctx *hime.Context) error {
 		d.Error = diffErr.Error()
 	}
 	return s.viewPage(ctx, "diff", d)
+}
+
+// resolveSessionDiffCwd picks a real project/worktree root for the session diff
+// page. Never returns the bot process cwd — empty cwd would make git diff the
+// grokwork repo itself when worktrees live under data/.
+func (s *Server) resolveSessionDiffCwd(ent sessionstore.Entry, threadID string) (cwd, project string) {
+	project = strings.TrimSpace(ent.Project)
+	mainCwd := strings.TrimSpace(ent.MainCwd)
+	if mainCwd == "" && project != "" {
+		if p, ok := s.cfg.ProjectPath(project); ok {
+			mainCwd = p
+		}
+	}
+
+	// Canonical / healed worktree under dataDir (requires real git root).
+	if path, onDisk := gitworktree.ResolveSessionWorktreePath(s.cfg.DataDir, project, threadID, ent.Cwd, mainCwd); onDisk {
+		return path, project
+	}
+
+	// Session metadata may have lost project/cwd while the worktree still exists.
+	if d, ok := gitworktree.FindOnDiskByUnitID(s.cfg.DataDir, threadID); ok && gitworktree.IsRepo(d.Path) {
+		if project == "" {
+			project = d.Project
+		}
+		return d.Path, project
+	}
+
+	// Session cwd if it is itself a worktree root (including main checkout).
+	if c := strings.TrimSpace(ent.Cwd); gitworktree.IsRepo(c) {
+		return c, project
+	}
+	if mainCwd != "" && gitworktree.IsRepo(mainCwd) {
+		return mainCwd, project
+	}
+	if project != "" {
+		if p, ok := s.cfg.ProjectPath(project); ok && gitworktree.IsRepo(p) {
+			return p, project
+		}
+	}
+	return "", project
 }
 
 func (s *Server) issuesIndex(ctx *hime.Context) error {

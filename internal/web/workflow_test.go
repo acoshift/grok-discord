@@ -3,8 +3,12 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -265,6 +269,27 @@ func TestSessionDiff(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// Mock IsRepo is not used; ghRunner still runs. Session cwd /tmp/wt is not a
+	// real repo, so resolve falls through unless we plant a disk worktree or
+	// make the mock path enough. Force via MainCwd project path from test config.
+	// Project "proj" has a real path under the test server temp dir.
+	projPath, ok := srv.cfg.ProjectPath("proj")
+	if !ok {
+		t.Fatal("proj path missing")
+	}
+	// init a real git repo at project path so resolveSessionDiffCwd accepts it
+	// when worktree is missing (main checkout fallback).
+	if err := execGitInit(t, projPath); err != nil {
+		t.Fatal(err)
+	}
+	var sawDir string
+	orig := srv.ghRunner
+	srv.ghRunner = func(ctx context.Context, dir, name string, args ...string) ([]byte, error) {
+		if name == "git" && len(args) > 0 && args[0] == "diff" {
+			sawDir = dir
+		}
+		return orig(ctx, dir, name, args...)
+	}
 	req := httptest.NewRequest(http.MethodGet, "/sessions/thread-99/diff", nil)
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, req)
@@ -275,6 +300,116 @@ func TestSessionDiff(t *testing.T) {
 	if !strings.Contains(body, "wt.go") || !strings.Contains(body, "@@") {
 		t.Fatalf("body=%s", body)
 	}
+	if sawDir != projPath {
+		t.Fatalf("diff cwd=%q want project path %q (not process cwd)", sawDir, projPath)
+	}
+}
+
+func TestSessionDiffDiscoversWorktreeWhenSessionMetadataEmpty(t *testing.T) {
+	srv := workflowServer(t)
+	// Corrupted/minimal session (issues only) — no project/cwd. Real bug path:
+	// empty cwd used to make git run in the bot process directory.
+	if err := srv.sessions.Set("1524411722717335604", sessionstore.Entry{
+		Issues: []sessionstore.TrackedIssue{{Number: 514}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	projPath, ok := srv.cfg.ProjectPath("proj")
+	if !ok {
+		t.Fatal("proj path")
+	}
+	if err := execGitInit(t, projPath); err != nil {
+		t.Fatal(err)
+	}
+	// Plant a real worktree under dataDir for this thread id under project "proj".
+	wt := filepath.Join(srv.cfg.DataDir, "worktrees", "proj", "1524411722717335604")
+	if err := os.MkdirAll(filepath.Dir(wt), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Linked worktree from proj checkout.
+	cmd := exec.Command("git", "-C", projPath, "worktree", "add", "-b", "grok/discord/1524411722717335604", wt)
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=t@e.com",
+		"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=t@e.com",
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("worktree add: %v\n%s", err, out)
+	}
+	var sawDir string
+	orig := srv.ghRunner
+	srv.ghRunner = func(ctx context.Context, dir, name string, args ...string) ([]byte, error) {
+		if name == "git" && len(args) > 0 && args[0] == "diff" {
+			sawDir = dir
+			return []byte("diff --git a/proj-only.go b/proj-only.go\n--- a/proj-only.go\n+++ b/proj-only.go\n@@ -1 +1 @@\n-a\n+b\n"), nil
+		}
+		return orig(ctx, dir, name, args...)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/sessions/1524411722717335604/diff", nil)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "proj-only.go") {
+		t.Fatalf("want project diff body, got %s", body)
+	}
+	if sawDir != wt {
+		t.Fatalf("diff cwd=%q want worktree %q", sawDir, wt)
+	}
+	if !strings.Contains(body, "proj") {
+		t.Fatalf("want recovered project name in page: %s", body)
+	}
+}
+
+func TestSessionDiffEmptyCwdDoesNotUseProcessDir(t *testing.T) {
+	srv := workflowServer(t)
+	if err := srv.sessions.Set("orphan", sessionstore.Entry{}); err != nil {
+		t.Fatal(err)
+	}
+	srv.ghRunner = func(ctx context.Context, dir, name string, args ...string) ([]byte, error) {
+		t.Fatalf("git must not run with empty/missing worktree; dir=%q args=%v", dir, args)
+		return nil, nil
+	}
+	req := httptest.NewRequest(http.MethodGet, "/sessions/orphan/diff", nil)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "no git worktree found") {
+		t.Fatalf("want error about missing worktree, got %s", body)
+	}
+}
+
+func execGitInit(t *testing.T, dir string) error {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	run := func(args ...string) error {
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=t@e.com",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=t@e.com",
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("git %v: %v\n%s", args, err, out)
+		}
+		return nil
+	}
+	if err := run("init"); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(dir, "README"), []byte("hi\n"), 0o644); err != nil {
+		return err
+	}
+	if err := run("add", "README"); err != nil {
+		return err
+	}
+	return run("commit", "-m", "init")
 }
 
 func TestShipBoardLinksToPRDetail(t *testing.T) {

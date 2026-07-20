@@ -11,33 +11,78 @@ import (
 
 func TestResolveSessionWorktreePathPrefersLiveSessionThenCanonical(t *testing.T) {
 	data := t.TempDir()
-	// Simulate post-rename: worktree lives under current dataDir, session still has old path.
-	canonical := WorktreePath(data, "app", "tid1")
-	if err := os.MkdirAll(canonical, 0o755); err != nil {
+	// Real worktree under current dataDir; session still has old absolute path.
+	repo := initTestRepo(t)
+	tr, err := Ensure(context.Background(), repo, data, "app", "tid1")
+	if err != nil {
 		t.Fatal(err)
 	}
 	stale := filepath.Join(t.TempDir(), "grok-discord", "data", "worktrees", "app", "tid1")
-	// stale dir does not exist
 
-	path, onDisk := ResolveSessionWorktreePath(data, "app", "tid1", stale, "/main/repo")
-	if !onDisk || path != canonical {
-		t.Fatalf("want canonical live path, got path=%q onDisk=%v", path, onDisk)
+	path, onDisk := ResolveSessionWorktreePath(data, "app", "tid1", stale, repo)
+	if !onDisk || path != tr.Path {
+		t.Fatalf("want canonical live path, got path=%q onDisk=%v want %q", path, onDisk, tr.Path)
 	}
 
 	// Prefer still-valid session cwd over canonical.
-	liveSession := filepath.Join(t.TempDir(), "custom-wt")
-	if err := os.MkdirAll(liveSession, 0o755); err != nil {
+	tr2, err := Ensure(context.Background(), repo, data, "app", "tid2")
+	if err != nil {
 		t.Fatal(err)
 	}
-	path, onDisk = ResolveSessionWorktreePath(data, "app", "tid2", liveSession, "/main/repo")
-	if !onDisk || path != liveSession {
+	// Session points at a custom live path (same as worktree root).
+	path, onDisk = ResolveSessionWorktreePath(data, "app", "tid2", tr2.Path, repo)
+	if !onDisk || path != tr2.Path {
 		t.Fatalf("want session cwd, got path=%q onDisk=%v", path, onDisk)
 	}
 
+	// Empty dir under dataDir is NOT onDisk (would otherwise git-climb to a parent repo).
+	empty := WorktreePath(data, "app", "empty-shell")
+	if err := os.MkdirAll(empty, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path, onDisk = ResolveSessionWorktreePath(data, "app", "empty-shell", "", repo)
+	if onDisk || path != empty {
+		t.Fatalf("want empty shell not onDisk, got path=%q onDisk=%v", path, onDisk)
+	}
+
 	// Neither exists → canonical, not on disk.
-	path, onDisk = ResolveSessionWorktreePath(data, "app", "missing", "/old/gone", "/main")
+	path, onDisk = ResolveSessionWorktreePath(data, "app", "missing", "/old/gone", repo)
 	if onDisk || path != WorktreePath(data, "app", "missing") {
 		t.Fatalf("want missing canonical, got path=%q onDisk=%v", path, onDisk)
+	}
+}
+
+func TestIsRepoRequiresWorktreeRoot(t *testing.T) {
+	repo := initTestRepo(t)
+	if !IsRepo(repo) {
+		t.Fatal("main repo should be a worktree root")
+	}
+	// Nested non-git dir must not inherit parent (bot dataDir is under grokwork).
+	nested := filepath.Join(repo, "data", "worktrees", "proj", "tid")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if IsRepo(nested) {
+		t.Fatal("nested empty dir must not count as repo root")
+	}
+	if IsRepo("") {
+		t.Fatal("empty path")
+	}
+}
+
+func TestFindOnDiskByUnitID(t *testing.T) {
+	data := t.TempDir()
+	repo := initTestRepo(t)
+	tr, err := Ensure(context.Background(), repo, data, "homeconnect", "1524411722717335604")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, ok := FindOnDiskByUnitID(data, "1524411722717335604")
+	if !ok || d.Path != tr.Path || d.Project != "homeconnect" {
+		t.Fatalf("got %+v ok=%v want path %q", d, ok, tr.Path)
+	}
+	if _, ok := FindOnDiskByUnitID(data, "missing"); ok {
+		t.Fatal("expected miss")
 	}
 }
 

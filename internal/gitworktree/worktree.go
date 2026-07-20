@@ -123,40 +123,77 @@ func WorktreePath(dataDir, project, unitID string) string {
 }
 
 // ResolveSessionWorktreePath picks the best on-disk worktree for a unit.
-// Prefer sessionCwd when it still exists; otherwise the canonical path under
-// dataDir. This heals sessions that stored absolute paths under an old data
-// directory (e.g. …/grok-discord/data/worktrees/… after a rename to grokwork).
-// When nothing is on disk, returns the canonical path with onDisk=false.
+// Prefer sessionCwd when it is still a real worktree root; otherwise the
+// canonical path under dataDir. This heals sessions that stored absolute paths
+// under an old data directory (e.g. …/grok-discord/data/worktrees/… after a
+// rename to grokwork). onDisk is true only when the path is a git worktree root
+// (not merely a directory nested inside another repo — worktrees live under
+// the bot dataDir, so empty dirs would otherwise resolve to the bot's own repo).
+// When nothing usable is on disk, returns the canonical path with onDisk=false.
 func ResolveSessionWorktreePath(dataDir, project, unitID, sessionCwd, mainCwd string) (path string, onDisk bool) {
 	canonical := WorktreePath(dataDir, project, unitID)
 	sessionCwd = strings.TrimSpace(sessionCwd)
 	mainCwd = strings.TrimSpace(mainCwd)
 
-	dirOK := func(p string) bool {
-		if p == "" {
-			return false
-		}
-		st, err := os.Stat(p)
-		return err == nil && st.IsDir()
-	}
-
-	// Live session path wins when it is a real worktree dir (not main checkout).
-	if sessionCwd != "" && sessionCwd != mainCwd && dirOK(sessionCwd) {
+	// Live session path wins when it is a real worktree root (not main checkout).
+	if sessionCwd != "" && sessionCwd != mainCwd && IsRepo(sessionCwd) {
 		return sessionCwd, true
 	}
-	if dirOK(canonical) {
+	if IsRepo(canonical) {
 		return canonical, true
 	}
 	return canonical, false
 }
 
+// FindOnDiskByUnitID returns the first on-disk worktree whose path segment is unitID.
+// Used when session metadata lost project/cwd but the worktree still exists under dataDir.
+func FindOnDiskByUnitID(dataDir, unitID string) (OnDisk, bool) {
+	unitID = strings.TrimSpace(unitID)
+	if unitID == "" {
+		return OnDisk{}, false
+	}
+	list, err := ListOnDisk(dataDir)
+	if err != nil {
+		return OnDisk{}, false
+	}
+	for _, d := range list {
+		if d.ThreadID == unitID {
+			return d, true
+		}
+	}
+	return OnDisk{}, false
+}
+
+// IsRepo reports whether dir is a git worktree root (not merely inside a parent
+// repo). Nested empty dirs under the bot's own checkout must return false so
+// callers never run git and accidentally diff the bot repository.
 func IsRepo(dir string) bool {
-	cmd := exec.Command("git", "-C", dir, "rev-parse", "--is-inside-work-tree")
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		return false
+	}
+	cmd := exec.Command("git", "-C", dir, "rev-parse", "--show-toplevel")
 	out, err := cmd.Output()
 	if err != nil {
 		return false
 	}
-	return strings.TrimSpace(string(out)) == "true"
+	top := strings.TrimSpace(string(out))
+	if top == "" {
+		return false
+	}
+	absDir, err1 := filepath.Abs(dir)
+	absTop, err2 := filepath.Abs(top)
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	// Prefer symlink-resolved paths when available (macOS /var vs /private/var).
+	if resolved, err := filepath.EvalSymlinks(absDir); err == nil {
+		absDir = resolved
+	}
+	if resolved, err := filepath.EvalSymlinks(absTop); err == nil {
+		absTop = resolved
+	}
+	return filepath.Clean(absDir) == filepath.Clean(absTop)
 }
 
 // CleanupIfPRDone removes the worktree/branch when the PR is merged or closed.

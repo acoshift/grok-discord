@@ -113,6 +113,9 @@ func TestWorktreeDiffWithMock(t *testing.T) {
 		if name != "git" || args[0] != "diff" {
 			t.Fatalf("%s %v", name, args)
 		}
+		if dir != "/wt" {
+			t.Fatalf("dir=%q", dir)
+		}
 		return []byte(samplePatch), nil
 	}
 	d, err := WorktreeDiffWith(context.Background(), run, "/wt", "origin/main", DiffCaps{})
@@ -121,6 +124,17 @@ func TestWorktreeDiffWithMock(t *testing.T) {
 	}
 	if len(d.Files) != 2 {
 		t.Fatalf("%+v", d)
+	}
+}
+
+func TestWorktreeDiffRejectsEmptyCwd(t *testing.T) {
+	run := func(ctx context.Context, dir, name string, args ...string) ([]byte, error) {
+		t.Fatal("runner must not be called with empty cwd")
+		return nil, nil
+	}
+	_, err := WorktreeDiffWith(context.Background(), run, "", "origin/main", DiffCaps{})
+	if err == nil {
+		t.Fatal("expected error for empty cwd")
 	}
 }
 
