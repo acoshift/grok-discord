@@ -28,6 +28,10 @@ func TestPreservePRFields(t *testing.T) {
 		CIAutoFixSHA:   "abc",
 		Goal:           "fix it",
 		BriefMsgID:     "brief-1",
+		Origin:         SourceWeb,
+		CreatedBy:      "web-user-1",
+		CreatedByName:  "Web Alice",
+		DiscordURL:     "https://discord.com/channels/1/2",
 	}
 	next := sessionstore.Entry{
 		SessionID: "s",
@@ -42,6 +46,9 @@ func TestPreservePRFields(t *testing.T) {
 	}
 	if next.Goal != "fix it" || next.BriefMsgID != "brief-1" {
 		t.Fatalf("brief fields not preserved: %+v", next)
+	}
+	if next.Origin != SourceWeb || next.CreatedBy != "web-user-1" || next.CreatedByName != "Web Alice" || next.DiscordURL == "" {
+		t.Fatalf("workflow fields not preserved via preservePRFields: %+v", next)
 	}
 	if next.SessionID != "s" {
 		t.Fatalf("clobbered session: %+v", next)

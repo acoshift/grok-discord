@@ -30,14 +30,26 @@ type runJob struct {
 	cancel  context.CancelFunc
 	start   time.Time
 	project string
+	// Live phase/activity for web StatusSnapshot (updated by progressLoop).
+	mu       sync.Mutex
+	activity string
+	phases   string
 }
 
 type taskItem struct {
 	s        *discordgo.Session
-	m        *discordgo.MessageCreate
+	m        *discordgo.MessageCreate // nil for web-origin / Discord-optional runs
 	parsed   Parsed
 	proj     projectRef
 	threadID string
+	// Dual-surface fields (optional; Discord handler fills actor/source).
+	actor           Actor
+	source          string // SourceDiscord | SourceWeb
+	attachmentPaths []string
+	origin          string
+	createdBy       string
+	createdByName   string
+	discordURL      string
 }
 
 type threadState struct {
@@ -51,6 +63,10 @@ type Bot struct {
 	sessions *sessionstore.Store
 	history  *history.Store
 	states   sync.Map // threadID → *threadState
+
+	discordMu sync.RWMutex
+	discord   *discordgo.Session // gateway session after Register
+	threadAPI threadAPI          // tests inject; nil → wrap discord
 }
 
 func New(cfg *config.Config, sessions *sessionstore.Store, hist *history.Store) *Bot {
@@ -64,6 +80,8 @@ type ActiveRun struct {
 	Started  time.Time `json:"started"`
 	Elapsed  string    `json:"elapsed"`
 	QueueLen int       `json:"queueLen"`
+	Activity string    `json:"activity,omitempty"`
+	Phases   string    `json:"phases,omitempty"`
 }
 
 // StatusSnapshot is a point-in-time view of bot activity for the web dashboard/SSE.
@@ -103,12 +121,17 @@ func (b *Bot) StatusSnapshot() StatusSnapshot {
 			snap.QueuedTotal += qlen
 			return true
 		}
+		job.mu.Lock()
+		activity, phases := job.activity, job.phases
+		job.mu.Unlock()
 		snap.ActiveRuns = append(snap.ActiveRuns, ActiveRun{
 			ThreadID: threadID,
 			Project:  job.project,
 			Started:  job.start,
 			Elapsed:  formatElapsed(now.Sub(job.start)),
 			QueueLen: qlen,
+			Activity: activity,
+			Phases:   phases,
 		})
 		snap.QueuedTotal += qlen
 		return true
@@ -190,6 +213,7 @@ func (b *Bot) clearQueue(threadID string) int {
 var errQueueFull = fmt.Errorf("follow-up queue is full (max %d)", maxFollowupQueue)
 
 func (b *Bot) Register(s *discordgo.Session) {
+	b.setDiscord(s)
 	s.AddHandler(b.onReady)
 	s.AddHandler(b.onMessage)
 	s.AddHandler(b.onInteraction)
@@ -547,11 +571,11 @@ func (b *Bot) resolveRunCwd(ctx context.Context, proj projectRef, threadID strin
 
 func remoteWorkPromptPrefix(branch string) string {
 	lines := []string{
-		"You are working remotely via Discord on a shared machine — not a local interactive session.",
+		"You are working on a shared workflow unit (Discord thread and/or web session) on a remote machine — not a local interactive session.",
 	}
 	if branch != "" {
 		lines = append(lines,
-			"Isolated git worktree for this Discord thread.",
+			"Isolated git worktree for this workflow unit / thread.",
 			"Branch: "+branch,
 			"Stay in this worktree; do not switch to the main checkout.",
 			"When you make code changes you MUST:",
@@ -560,7 +584,7 @@ func remoteWorkPromptPrefix(branch string) string {
 			"3. Open a pull request with `gh pr create` (or push to update an existing PR for this branch).",
 			"",
 			"Uploading files to Discord: only files inside THIS worktree can be attached.",
-			"If the user wants a build artifact, report, APK, Excel, etc. on Discord, write the file under the worktree, then end your reply with:",
+			"If the user wants a build artifact, report, APK, Excel, etc. shared back, write the file under the worktree, then end your reply with:",
 			"DISCORD_UPLOAD:",
 			"path/relative/to/worktree/file.apk",
 			"(one path per line; relative paths preferred; max 10 files, 25 MiB each).",
@@ -580,7 +604,7 @@ func remoteWorkPromptPrefix(branch string) string {
 	}
 	lines = append(lines,
 		"Do not leave work as local-only commits. Do not merge the PR.",
-		"Include the PR URL in your final reply to Discord.",
+		"Include the PR URL in your final reply.",
 		"",
 	)
 	return strings.Join(lines, "\n")
@@ -693,7 +717,16 @@ func (b *Bot) handleTask(s *discordgo.Session, m *discordgo.MessageCreate, parse
 	}
 	log.Printf("task: thread=%s title=%q", threadID, title)
 
-	item := taskItem{s: s, m: m, parsed: parsed, proj: proj, threadID: threadID}
+	item := taskItem{
+		s: s, m: m, parsed: parsed, proj: proj, threadID: threadID,
+		actor:  ActorFromUser(m.Author),
+		source: SourceDiscord,
+		origin: SourceDiscord,
+	}
+	if m.Author != nil {
+		item.createdBy = m.Author.ID
+		item.createdByName = m.Author.String()
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	job := &runJob{cancel: cancel, start: time.Now(), project: proj.Name}
 	claimed, queuePos, qerr := b.claimOrEnqueue(threadID, job, item)
@@ -723,32 +756,53 @@ func (b *Bot) handleTask(s *discordgo.Session, m *discordgo.MessageCreate, parse
 
 func (b *Bot) executeTask(ctx context.Context, item taskItem, job *runJob) {
 	s, m, parsed, proj, threadID := item.s, item.m, item.parsed, item.proj, item.threadID
+	actor := item.actor
+	if actor.ID == "" && m != nil && m.Author != nil {
+		actor = ActorFromUser(m.Author)
+	}
+	// Prefer live gateway session when item.s is nil (web path).
+	if s == nil {
+		s = b.Discord()
+	}
+	present := s != nil // Discord presentation available
 
 	// Bind owner before the run so /cancel is gated for multi-person threads
 	// even on the first task (session used to be written only after grok exits).
-	b.bindThreadOwner(threadID, proj.Name, m)
+	b.bindThreadOwnerActor(threadID, proj.Name, actor)
 	// open → in_progress on first real work (manual labels stay sticky).
-	b.applyAutoLabelOnRunStart(threadID, proj.Name, m)
+	b.applyAutoLabelOnRunStart(threadID, proj.Name, actor)
 
 	var thoughts thoughtTracker
-	status, err := discordSendComponents(s, threadID,
-		workingStatus(proj.Name, 0, "", formatPhaseChips([phaseCount]bool{}, -1)),
-		actionBarRunning(threadID),
-	)
-	if err != nil {
-		log.Printf("error: status message thread=%s: %v", threadID, err)
-		return
+	var statusID string
+	if present {
+		status, err := discordSendComponents(s, threadID,
+			workingStatus(proj.Name, 0, "", formatPhaseChips([phaseCount]bool{}, -1)),
+			actionBarRunning(threadID),
+		)
+		if err != nil {
+			log.Printf("error: status message thread=%s: %v", threadID, err)
+			// Soft-degrade: continue without live Discord status (still run Grok).
+			present = false
+		} else {
+			statusID = status.ID
+		}
 	}
 
-	streamer := newStreamPoster(s, threadID)
+	var streamer *streamPoster
+	if present {
+		streamer = newStreamPoster(s, threadID)
+	} else {
+		streamer = newStreamPosterWith(noopMessenger{}, threadID)
+	}
 
 	stopProgress := make(chan struct{})
 	var progressWG sync.WaitGroup
 	progressWG.Add(1)
 	go func() {
 		defer progressWG.Done()
-		b.progressLoop(s, threadID, status.ID, proj.Name, job.start, &thoughts, stopProgress)
+		b.progressLoop(s, threadID, statusID, proj.Name, job, &thoughts, stopProgress)
 	}()
+	defer b.clearRunActivity(threadID)
 
 	runCwd, wtBranch, wtErr := b.resolveRunCwd(ctx, proj, threadID)
 	if wtErr != nil {
@@ -756,10 +810,12 @@ func (b *Bot) executeTask(ctx context.Context, item taskItem, job *runJob) {
 		close(stopProgress)
 		progressWG.Wait()
 		log.Printf("error: worktree thread=%s: %v", threadID, wtErr)
-		if editErr := discordEditComponents(s, threadID, status.ID, "Failed · worktree", actionBarDone(threadID), true); editErr != nil {
-			log.Printf("error: edit status: %v", editErr)
+		if present && statusID != "" {
+			if editErr := discordEditComponents(s, threadID, statusID, "Failed · worktree", actionBarDone(threadID), true); editErr != nil {
+				log.Printf("error: edit status: %v", editErr)
+			}
+			sendChunks(s, threadID, "Could not create git worktree: "+wtErr.Error())
 		}
-		sendChunks(s, threadID, "Could not create git worktree: "+wtErr.Error())
 		return
 	}
 	if wtBranch != "" {
@@ -771,7 +827,7 @@ func (b *Bot) executeTask(ctx context.Context, item taskItem, job *runJob) {
 	prompt := parsed.Prompt
 
 	var related *discordgo.Message
-	if hasMessageReference(m) {
+	if present && m != nil && hasMessageReference(m) {
 		refMsg, refErr := resolveReferencedMessage(s, m)
 		if refErr != nil {
 			log.Printf("warn: referenced message: %v", refErr)
@@ -780,35 +836,47 @@ func (b *Bot) executeTask(ctx context.Context, item taskItem, job *runJob) {
 			prompt = promptWithReferenced(prompt, related)
 			log.Printf("task: included referenced message id=%s attachments=%d contentLen=%d",
 				related.ID, len(related.Attachments), len(related.Content))
-		} else {
+		} else if m.MessageReference != nil {
 			log.Printf("warn: referenced message %s missing or deleted", m.MessageReference.MessageID)
 		}
 	}
 
-	attachments := collectAttachments(m.Attachments, related)
-	if len(attachments) > 0 {
-		attDir := filepath.Join(b.cfg.DataDir, "attachments", m.ID)
-		defer func() {
-			if rmErr := os.RemoveAll(attDir); rmErr != nil {
-				log.Printf("warn: cleanup attachments %s: %v", attDir, rmErr)
-			}
-		}()
-		log.Printf("task: downloading %d attachment(s) → %s", len(attachments), attDir)
-		files, dlErr := downloadAttachments(ctx, attachments, attDir)
-		if dlErr != nil {
-			streamer.Stop()
-			close(stopProgress)
-			progressWG.Wait()
-			log.Printf("error: attachments: %v", dlErr)
-			msg := "Could not download attachments: " + dlErr.Error()
-			if editErr := discordEditComponents(s, threadID, status.ID, "Failed · attachments", actionBarDone(threadID), true); editErr != nil {
-				log.Printf("error: edit status: %v", editErr)
-			}
-			sendChunks(s, threadID, msg)
-			return
+	// Prefer pre-downloaded paths (web); else Discord attachment download.
+	if len(item.attachmentPaths) > 0 {
+		var files []savedAttachment
+		for _, p := range item.attachmentPaths {
+			files = append(files, savedAttachment{Path: p, Filename: filepath.Base(p)})
 		}
 		prompt = promptWithAttachments(prompt, files)
-		log.Printf("task: saved %d attachment(s)", len(files))
+		log.Printf("task: using %d pre-attached path(s)", len(files))
+	} else if present && m != nil {
+		attachments := collectAttachments(m.Attachments, related)
+		if len(attachments) > 0 {
+			attDir := filepath.Join(b.cfg.DataDir, "attachments", m.ID)
+			defer func() {
+				if rmErr := os.RemoveAll(attDir); rmErr != nil {
+					log.Printf("warn: cleanup attachments %s: %v", attDir, rmErr)
+				}
+			}()
+			log.Printf("task: downloading %d attachment(s) → %s", len(attachments), attDir)
+			files, dlErr := downloadAttachments(ctx, attachments, attDir)
+			if dlErr != nil {
+				streamer.Stop()
+				close(stopProgress)
+				progressWG.Wait()
+				log.Printf("error: attachments: %v", dlErr)
+				msg := "Could not download attachments: " + dlErr.Error()
+				if statusID != "" {
+					if editErr := discordEditComponents(s, threadID, statusID, "Failed · attachments", actionBarDone(threadID), true); editErr != nil {
+						log.Printf("error: edit status: %v", editErr)
+					}
+				}
+				sendChunks(s, threadID, msg)
+				return
+			}
+			prompt = promptWithAttachments(prompt, files)
+			log.Printf("task: saved %d attachment(s)", len(files))
+		}
 	}
 	// Normalize Discord link markup and keep query/# fragments explicit for the model.
 	prompt = enrichPromptWithLinks(prompt)
@@ -903,13 +971,25 @@ func (b *Bot) executeTask(ctx context.Context, item taskItem, job *runJob) {
 				sid = e.SessionID
 			}
 		}
+		lastUser := actor.String()
 		entry := sessionstore.Entry{
 			SessionID:      sid,
 			Project:        proj.Name,
 			Cwd:            runCwd,
 			MainCwd:        proj.Cwd,
 			WorktreeBranch: wtBranch,
-			LastUser:       m.Author.String(),
+			LastUser:       lastUser,
+			Origin:         item.origin,
+			CreatedBy:      item.createdBy,
+			CreatedByName:  item.createdByName,
+			DiscordURL:     item.discordURL,
+		}
+		if entry.Origin == "" && item.source != "" {
+			entry.Origin = item.source
+		}
+		if entry.CreatedBy == "" && actor.ID != "" {
+			entry.CreatedBy = actor.ID
+			entry.CreatedByName = actor.DisplayName
 		}
 		preservePRFields(&entry, prev)
 		// Prefer latest goal/brief msg id if /brief raced in while this run finished.
@@ -922,8 +1002,8 @@ func (b *Bot) executeTask(ctx context.Context, item taskItem, job *runJob) {
 				entry.BriefMsgID = fresh.BriefMsgID
 			}
 		}
-		if m.Author != nil {
-			ensureSessionOwner(&entry, m.Author.ID, m.Author.String())
+		if actor.ID != "" {
+			ensureSessionOwner(&entry, actor.ID, actor.String())
 		}
 		// Keep lifecycle aligned with session/worktree even when no PR is discovered yet.
 		entry.ApplyAutoLabel(entry.SuggestAutoLabel(false))
@@ -950,8 +1030,10 @@ func (b *Bot) executeTask(ctx context.Context, item taskItem, job *runJob) {
 	if ctxSum := result.ContextSummary(); ctxSum != "" {
 		header += " · ctx " + ctxSum
 	}
-	if err := discordEditComponents(s, threadID, status.ID, header, actionBarDone(threadID), true); err != nil {
-		log.Printf("error: edit status: %v", err)
+	if present && statusID != "" {
+		if err := discordEditComponents(s, threadID, statusID, header, actionBarDone(threadID), true); err != nil {
+			log.Printf("error: edit status: %v", err)
+		}
 	}
 
 	var fullyStreamed bool
@@ -961,38 +1043,40 @@ func (b *Bot) executeTask(ctx context.Context, item taskItem, job *runJob) {
 	} else {
 		fullyStreamed = streamer.Finish()
 	}
-	if !fullyStreamed {
-		rem := streamer.Unposted()
-		if rem == "" {
-			rem = result.Text
+	if present {
+		if !fullyStreamed {
+			rem := streamer.Unposted()
+			if rem == "" {
+				rem = result.Text
+			}
+			sendChunks(s, threadID, rem)
+		} else if result.MaxTurnsReached && !strings.Contains(streamer.Text(), "Reached max turns") {
+			// Stream finished before the notice was injected (e.g. stderr-only detection).
+			sendChunks(s, threadID, grokrun.MaxTurnsUserMessage)
 		}
-		sendChunks(s, threadID, rem)
-	} else if result.MaxTurnsReached && !strings.Contains(streamer.Text(), "Reached max turns") {
-		// Stream finished before the notice was injected (e.g. stderr-only detection).
-		sendChunks(s, threadID, grokrun.MaxTurnsUserMessage)
+
+		if result.Stderr != "" && os.Getenv("GROK_DISCORD_DEBUG") != "" {
+			errText := result.Stderr
+			if len(errText) > 1500 {
+				errText = errText[:1500]
+			}
+			sendChunks(s, threadID, "stderr:\n```\n"+errText+"\n```")
+		}
+
+		// Attach files requested via DISCORD_UPLOAD: markers — worktree only.
+		if wtBranch != "" && !result.Cancelled {
+			uploadText := result.Text
+			if uploadText == "" {
+				uploadText = streamer.Text()
+			}
+			uploadWorktreeFiles(s, threadID, runCwd, uploadText)
+		}
 	}
 
-	if result.Stderr != "" && os.Getenv("GROK_DISCORD_DEBUG") != "" {
-		errText := result.Stderr
-		if len(errText) > 1500 {
-			errText = errText[:1500]
-		}
-		sendChunks(s, threadID, "stderr:\n```\n"+errText+"\n```")
-	}
+	b.recordTurnActor(threadID, actor, m, proj.Name, parsed.Prompt, result, elapsed)
 
-	// Attach files requested via DISCORD_UPLOAD: markers — worktree only.
-	if wtBranch != "" && !result.Cancelled {
-		uploadText := result.Text
-		if uploadText == "" {
-			uploadText = streamer.Text()
-		}
-		uploadWorktreeFiles(s, threadID, runCwd, uploadText)
-	}
-
-	b.recordTurn(threadID, m, proj.Name, parsed.Prompt, result, elapsed)
-
-	// PR status card: parse reply / gh by branch, post or edit one message.
-	if !result.Cancelled {
+	// PR status card / completion / brief: only when Discord presentation is live.
+	if present && !result.Cancelled {
 		replyText := result.Text
 		if replyText == "" {
 			replyText = streamer.Text()
@@ -1002,25 +1086,34 @@ func (b *Bot) executeTask(ctx context.Context, item taskItem, job *runJob) {
 			repoDir = proj.Cwd
 		}
 		b.refreshPRAfterTask(s, threadID, repoDir, wtBranch, replyText)
-	}
-
-	// Completion summary: deterministic git diff --stat / name-status + risk flags.
-	if !result.Cancelled {
 		b.postCompletionSummary(s, threadID, proj.Name, runCwd, wtBranch, elapsed, result.Code, result.Cancelled)
-	}
-
-	// Continuity brief: update pinned card after each non-cancelled run.
-	if !result.Cancelled {
 		b.ensureThreadGoal(threadID, parsed.Prompt)
 		if _, err := b.refreshBriefCard(s, threadID, runCwd); err != nil {
 			log.Printf("brief: post-task refresh thread=%s: %v", threadID, err)
 		}
+	} else if !result.Cancelled {
+		// Still set sticky goal without Discord card.
+		b.ensureThreadGoal(threadID, parsed.Prompt)
 	}
 
-	log.Printf("task: finished msg=%s thread=%s", m.ID, threadID)
+	msgTag := ""
+	if m != nil {
+		msgTag = m.ID
+	} else {
+		msgTag = item.source
+	}
+	log.Printf("task: finished msg=%s thread=%s source=%s present=%v", msgTag, threadID, item.source, present)
 }
 
 func (b *Bot) recordTurn(threadID string, m *discordgo.MessageCreate, project, userPrompt string, result grokrun.Result, elapsed time.Duration) {
+	actor := Actor{}
+	if m != nil {
+		actor = ActorFromUser(m.Author)
+	}
+	b.recordTurnActor(threadID, actor, m, project, userPrompt, result, elapsed)
+}
+
+func (b *Bot) recordTurnActor(threadID string, actor Actor, m *discordgo.MessageCreate, project, userPrompt string, result grokrun.Result, elapsed time.Duration) {
 	if b.history == nil {
 		return
 	}
@@ -1037,8 +1130,8 @@ func (b *Bot) recordTurn(threadID string, m *discordgo.MessageCreate, project, u
 		status = "error"
 		errMsg = historyErrorFromResult(result)
 	}
-	user, userID := "", ""
-	if m != nil && m.Author != nil {
+	user, userID := actor.String(), actor.ID
+	if user == "" && m != nil && m.Author != nil {
 		user = m.Author.String()
 		userID = m.Author.ID
 	}
@@ -1100,9 +1193,13 @@ func historyErrorFromResult(result grokrun.Result) string {
 	return "Run failed"
 }
 
-func (b *Bot) progressLoop(s *discordgo.Session, threadID, msgID, project string, start time.Time, thoughts *thoughtTracker, stop <-chan struct{}) {
+func (b *Bot) progressLoop(s *discordgo.Session, threadID, msgID, project string, job *runJob, thoughts *thoughtTracker, stop <-chan struct{}) {
 	ticker := time.NewTicker(progressInterval)
 	defer ticker.Stop()
+	start := time.Now()
+	if job != nil {
+		start = job.start
+	}
 	for {
 		select {
 		case <-stop:
@@ -1111,6 +1208,11 @@ func (b *Bot) progressLoop(s *discordgo.Session, threadID, msgID, project string
 			activity, phases := "", formatPhaseChips([phaseCount]bool{}, -1)
 			if thoughts != nil {
 				activity, phases = thoughts.Progress()
+			}
+			// Always publish for web StatusSnapshot / SSE chips.
+			b.publishRunActivity(threadID, activity, phases)
+			if s == nil || msgID == "" || msgID == "noop" {
+				continue
 			}
 			text := workingStatus(project, time.Since(start), activity, phases)
 			if _, err := s.ChannelMessageEdit(threadID, msgID, text); err != nil {

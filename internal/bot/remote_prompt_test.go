@@ -8,7 +8,7 @@ import (
 func TestRemoteWorkPromptPrefixWorktree(t *testing.T) {
 	p := remoteWorkPromptPrefix("grok/discord/123")
 	for _, want := range []string{
-		"remotely via Discord",
+		"workflow unit",
 		"Branch: grok/discord/123",
 		"git push",
 		"gh pr create",
@@ -20,12 +20,16 @@ func TestRemoteWorkPromptPrefixWorktree(t *testing.T) {
 			t.Fatalf("missing %q in:\n%s", want, p)
 		}
 	}
+	// Must not be Discord-exclusive wording only.
+	if !strings.Contains(p, "shared machine") && !strings.Contains(p, "remote machine") {
+		t.Fatalf("expected remote/shared machine wording: %s", p)
+	}
 }
 
 func TestRemoteWorkPromptPrefixNoWorktree(t *testing.T) {
 	p := remoteWorkPromptPrefix("")
 	for _, want := range []string{
-		"remotely via Discord",
+		"workflow unit",
 		"feature branch",
 		"gh pr create",
 		"PR URL",

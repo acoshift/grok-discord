@@ -5,6 +5,50 @@ import (
 	"testing"
 )
 
+func TestWorkflowFieldsRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	s, err := New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Entry{
+		SessionID:     "sess-w",
+		Project:       "app",
+		LastUser:      "Alice",
+		Origin:        "web",
+		CreatedBy:     "u-42",
+		CreatedByName: "Alice Web",
+		DiscordURL:    "https://discord.com/channels/g/c/t",
+		OwnerID:       "u-42",
+		OwnerName:     "Alice Web",
+	}
+	if err := s.Set("thread-web-1", want); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := s.Get("thread-web-1")
+	if !ok {
+		t.Fatal("missing entry")
+	}
+	if got.Origin != "web" || got.CreatedBy != "u-42" || got.CreatedByName != "Alice Web" {
+		t.Fatalf("workflow fields: %+v", got)
+	}
+	if got.DiscordURL != want.DiscordURL {
+		t.Fatalf("discordURL=%q", got.DiscordURL)
+	}
+	// Reload from disk.
+	s2, err := New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got2, ok := s2.Get("thread-web-1")
+	if !ok {
+		t.Fatal("missing after reload")
+	}
+	if got2.Origin != "web" || got2.CreatedBy != "u-42" || got2.DiscordURL != want.DiscordURL {
+		t.Fatalf("reload dropped workflow fields: %+v", got2)
+	}
+}
+
 func TestListAndCount(t *testing.T) {
 	dir := t.TempDir()
 	s, err := New(dir)

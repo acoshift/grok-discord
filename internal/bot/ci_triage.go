@@ -379,7 +379,11 @@ func (b *Bot) queueSystemTask(s *discordgo.Session, threadID, prompt, label stri
 		},
 	}
 	parsed := Parsed{Kind: KindTask, Prompt: prompt}
-	item := taskItem{s: s, m: m, parsed: parsed, proj: projectRef{Name: projName, Cwd: cwd}, threadID: threadID}
+	item := taskItem{
+		s: s, m: m, parsed: parsed, proj: projectRef{Name: projName, Cwd: cwd}, threadID: threadID,
+		actor: Actor{ID: "0", DisplayName: label}, source: SourceDiscord, origin: SourceDiscord,
+		createdBy: "0", createdByName: label,
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	job := &runJob{cancel: cancel, start: time.Now(), project: projName}
@@ -416,10 +420,23 @@ func (b *Bot) drainTaskQueue(ctx context.Context, cancel context.CancelFunc, ite
 		nextCtx, nextCancel := context.WithCancel(context.Background())
 		nextJob := &runJob{cancel: nextCancel, start: time.Now(), project: next.proj.Name}
 		b.replaceJob(next.threadID, nextJob)
-		log.Printf("task: draining queue thread=%s nextMsg=%s remaining=%d",
-			next.threadID, next.m.ID, b.queueLen(next.threadID))
-		if _, sendErr := next.s.ChannelMessageSend(next.threadID, "Starting queued follow-up…"); sendErr != nil {
-			log.Printf("error: reply queue-start: %v", sendErr)
+		nextTag := next.source
+		if next.m != nil {
+			nextTag = next.m.ID
+		} else if next.actor.ID != "" {
+			nextTag = next.actor.ID
+		}
+		log.Printf("task: draining queue thread=%s next=%s remaining=%d",
+			next.threadID, nextTag, b.queueLen(next.threadID))
+		// Discord-optional: web queue items have m/s nil; fall back to live gateway when present.
+		s := next.s
+		if s == nil {
+			s = b.Discord()
+		}
+		if s != nil {
+			if _, sendErr := s.ChannelMessageSend(next.threadID, "Starting queued follow-up…"); sendErr != nil {
+				log.Printf("error: reply queue-start: %v", sendErr)
+			}
 		}
 		item = next
 		job = nextJob

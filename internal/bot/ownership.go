@@ -314,7 +314,15 @@ func ensureSessionOwner(e *sessionstore.Entry, userID, displayName string) {
 // bindThreadOwner persists owner early (start of a run) so cancel is gated before the
 // first task finishes. No-op when an owner is already set. Preserves other session fields.
 func (b *Bot) bindThreadOwner(threadID, project string, m *discordgo.MessageCreate) {
-	if b == nil || b.sessions == nil || threadID == "" || m == nil || m.Author == nil {
+	if m == nil {
+		return
+	}
+	b.bindThreadOwnerActor(threadID, project, ActorFromUser(m.Author))
+}
+
+// bindThreadOwnerActor is the Discord-optional owner bind path.
+func (b *Bot) bindThreadOwnerActor(threadID, project string, actor Actor) {
+	if b == nil || b.sessions == nil || threadID == "" || actor.ID == "" {
 		return
 	}
 	e, ok := b.sessions.Get(threadID)
@@ -327,7 +335,7 @@ func (b *Bot) bindThreadOwner(threadID, project string, m *discordgo.MessageCrea
 	if e.Project == "" {
 		e.Project = project
 	}
-	ensureSessionOwner(&e, m.Author.ID, m.Author.String())
+	ensureSessionOwner(&e, actor.ID, actor.String())
 	if err := b.sessions.Set(threadID, e); err != nil {
 		log.Printf("warn: bind owner thread=%s: %v", threadID, err)
 	}

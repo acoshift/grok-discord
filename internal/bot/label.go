@@ -153,7 +153,7 @@ func (b *Bot) maybeRefreshBriefLabel(s *discordgo.Session, threadID string) {
 }
 
 // applyAutoLabelOnRunStart promotes open → in_progress when a task starts.
-func (b *Bot) applyAutoLabelOnRunStart(threadID, project string, m *discordgo.MessageCreate) {
+func (b *Bot) applyAutoLabelOnRunStart(threadID, project string, actor Actor) {
 	if b == nil || b.sessions == nil || threadID == "" {
 		return
 	}
@@ -161,16 +161,16 @@ func (b *Bot) applyAutoLabelOnRunStart(threadID, project string, m *discordgo.Me
 		if ent.Project == "" {
 			ent.Project = project
 		}
-		if m != nil && m.Author != nil {
-			ensureSessionOwner(ent, m.Author.ID, m.Author.String())
+		if actor.ID != "" {
+			ensureSessionOwner(ent, actor.ID, actor.String())
 		}
 		ent.ApplyAutoLabelOnRunStart()
 	}); err != nil {
 		log.Printf("label: run-start thread=%s: %v", threadID, err)
 	} else if !ok {
 		e := sessionstore.Entry{Project: project, Label: sessionstore.LabelInProgress}
-		if m != nil && m.Author != nil {
-			ensureSessionOwner(&e, m.Author.ID, m.Author.String())
+		if actor.ID != "" {
+			ensureSessionOwner(&e, actor.ID, actor.String())
 		}
 		if err := b.sessions.Set(threadID, e); err != nil {
 			log.Printf("label: create on run-start thread=%s: %v", threadID, err)

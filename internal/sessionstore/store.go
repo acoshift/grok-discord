@@ -24,6 +24,12 @@ type Entry struct {
 	OwnerName  string   `json:"ownerName,omitempty"`
 	CoOwnerIDs []string `json:"coOwnerIds,omitempty"`
 
+	// Dual-surface workflow metadata (web + Discord). Preserved across session Set rebuilds.
+	Origin        string `json:"origin,omitempty"`        // "discord" | "web"
+	CreatedBy     string `json:"createdBy,omitempty"`     // Discord snowflake or web:<id>
+	CreatedByName string `json:"createdByName,omitempty"` // display name
+	DiscordURL    string `json:"discordUrl,omitempty"`    // jump link when known
+
 	// Continuity / brief card: one pinned message (goal, progress, branch, PR, files).
 	// Goal is sticky (first task prompt unless set via /brief goal …).
 	Goal       string `json:"goal,omitempty"`

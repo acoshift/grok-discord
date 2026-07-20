@@ -2,6 +2,7 @@ package bot
 
 import (
 	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 
@@ -110,6 +111,9 @@ func discordSend(s *discordgo.Session, channelID, content string) (*discordgo.Me
 }
 
 func discordSendComponents(s *discordgo.Session, channelID, content string, components []discordgo.MessageComponent) (*discordgo.Message, error) {
+	if s == nil {
+		return nil, fmt.Errorf("discord session is nil")
+	}
 	content = sanitizeDiscordContent(content)
 	msg := &discordgo.MessageSend{
 		Content: content,
@@ -132,6 +136,9 @@ func discordEdit(s *discordgo.Session, channelID, msgID, content string) error {
 // discordEditComponents edits content and optionally replaces or clears components.
 // When setComponents is false, existing buttons are left unchanged (field omitted).
 func discordEditComponents(s *discordgo.Session, channelID, msgID, content string, components []discordgo.MessageComponent, setComponents bool) error {
+	if s == nil {
+		return fmt.Errorf("discord session is nil")
+	}
 	content = sanitizeDiscordContent(content)
 	edit := &discordgo.MessageEdit{
 		Channel: channelID,
@@ -155,6 +162,9 @@ func discordEditComponents(s *discordgo.Session, channelID, msgID, content strin
 }
 
 func discordSendReply(s *discordgo.Session, channelID, content string, reference *discordgo.MessageReference) (*discordgo.Message, error) {
+	if s == nil {
+		return nil, fmt.Errorf("discord session is nil")
+	}
 	content = sanitizeDiscordContent(content)
 	return s.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{
 		Content:   content,
@@ -169,6 +179,9 @@ func discordSendReply(s *discordgo.Session, channelID, content string, reference
 // discordSendEmbed posts a rich embed. Unlike discordSend, it does not set
 // SuppressEmbeds — that flag would drop custom embeds as well as link unfurls.
 func discordSendEmbed(s *discordgo.Session, channelID string, embeds ...*discordgo.MessageEmbed) (*discordgo.Message, error) {
+	if s == nil {
+		return nil, fmt.Errorf("discord session is nil")
+	}
 	if len(embeds) == 0 {
 		return nil, errNoEmbeds
 	}
