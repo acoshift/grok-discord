@@ -11,9 +11,12 @@ import (
 
 	"github.com/moonrhythm/hime"
 
+	"github.com/acoshift/grok-discord/internal/audit"
 	"github.com/acoshift/grok-discord/internal/bot"
 	"github.com/acoshift/grok-discord/internal/config"
+	"github.com/acoshift/grok-discord/internal/ghpr"
 	"github.com/acoshift/grok-discord/internal/history"
+	"github.com/acoshift/grok-discord/internal/linear"
 	"github.com/acoshift/grok-discord/internal/sessionstore"
 )
 
@@ -25,16 +28,33 @@ var staticFS embed.FS
 
 // Server is the private-network admin UI.
 type Server struct {
-	cfg      *config.Config
-	sessions *sessionstore.Store
-	history  *history.Store
-	bot      *bot.Bot
-	app      *hime.App
+	cfg         *config.Config
+	sessions    *sessionstore.Store
+	history     *history.Store
+	bot         *bot.Bot
+	app         *hime.App
+	webSessions *sessionStore
+	oauth       DiscordOAuth // nil → HTTPDiscordOAuth
+	audit       *audit.Logger
+	// Test injectables (nil → production defaults).
+	ghRunner  ghpr.Runner
+	linearNew func(apiKey string) *linear.Client
 }
 
 // New builds a hime app with dashboard, history, config, and SSE routes.
 func New(cfg *config.Config, sessions *sessionstore.Store, hist *history.Store, b *bot.Bot) *Server {
-	s := &Server{cfg: cfg, sessions: sessions, history: hist, bot: b}
+	if err := cfg.ValidateWebAuth(); err != nil {
+		panic("web: " + err.Error())
+	}
+	webSess, err := newSessionStore(cfg.DataDir)
+	if err != nil {
+		panic("web: session store: " + err.Error())
+	}
+	auditLog, err := audit.New(cfg.DataDir)
+	if err != nil {
+		panic("web: audit: " + err.Error())
+	}
+	s := &Server{cfg: cfg, sessions: sessions, history: hist, bot: b, webSessions: webSess, audit: auditLog}
 	app := hime.New()
 	app.Address(cfg.ListenAddr())
 	// POST forms under hx-boost still use 3xx; non-boosted htmx posts get HX-Redirect.
@@ -49,25 +69,35 @@ func New(cfg *config.Config, sessions *sessionstore.Store, hist *history.Store, 
 	app.Server().GraceTimeout = time.Millisecond
 
 	app.Routes(hime.Routes{
-		"dashboard":            "/",
-		"history":              "/history",
-		"history.thread":       "/history/",
-		"ship":                 "/ship",
-		"worktrees":            "/worktrees",
-		"worktrees.prune":      "/worktrees/prune",
-		"worktrees.pruneIdle":  "/worktrees/prune-idle",
-		"config":               "/config",
+		"dashboard":               "/",
+		"login":                   "/login",
+		"auth.discord":            "/auth/discord",
+		"auth.discord.callback":   "/auth/discord/callback",
+		"logout":                  "/logout",
+		"history":                 "/history",
+		"history.thread":          "/history/",
+		"ship":                    "/ship",
+		"worktrees":               "/worktrees",
+		"worktrees.prune":         "/worktrees/prune",
+		"worktrees.pruneIdle":     "/worktrees/prune-idle",
+		"config":                  "/config",
 		"config.addProject":       "/config/projects",
 		"config.removeProject":    "/config/projects/remove",
 		"config.setProjectLinear": "/config/projects/linear",
-		"config.addUser":       "/config/users",
-		"config.removeUser":    "/config/users/remove",
-		"config.addRole":       "/config/roles",
-		"config.removeRole":    "/config/roles/remove",
-		"config.addChannel":    "/config/channels",
-		"config.removeChannel": "/config/channels/remove",
-		"config.settings":      "/config/settings",
-		"sse":                  "/events",
+		"config.setProjectGitHub": "/config/projects/github",
+		"config.setProjectChannel": "/config/projects/channel",
+		"config.setGuild":         "/config/guild",
+		"config.addUser":          "/config/users",
+		"config.removeUser":       "/config/users/remove",
+		"config.addRole":          "/config/roles",
+		"config.removeRole":       "/config/roles/remove",
+		"config.addChannel":       "/config/channels",
+		"config.removeChannel":    "/config/channels/remove",
+		"config.settings":         "/config/settings",
+		"issues":                  "/issues",
+		"issues.project":          "/projects/",
+		"pr.detail":               "/prs/",
+		"sse":                     "/events",
 		// Live partials (htmx SSE domain swaps) — separate URLs so each region
 		// can refresh independently. Fragments render via View("page#define").
 		"partial.dashboard.stats": "/partials/dashboard/stats",
@@ -95,6 +125,14 @@ func New(cfg *config.Config, sessions *sessionstore.Store, hist *history.Store, 
 	tp.ParseFiles("ship", "layout.tmpl", "ship.tmpl")
 	tp.ParseFiles("worktrees", "layout.tmpl", "worktrees.tmpl")
 	tp.ParseFiles("config", "layout.tmpl", "config.tmpl")
+	tp.ParseFiles("login", "layout.tmpl", "login.tmpl")
+	tp.ParseFiles("issues_index", "layout.tmpl", "issues_index.tmpl")
+	tp.ParseFiles("issues", "layout.tmpl", "issues.tmpl")
+	tp.ParseFiles("issue_detail", "layout.tmpl", "issue_detail.tmpl")
+	tp.ParseFiles("linear_issues", "layout.tmpl", "linear_issues.tmpl")
+	tp.ParseFiles("linear_detail", "layout.tmpl", "linear_detail.tmpl")
+	tp.ParseFiles("pr_detail", "layout.tmpl", "pr_detail.tmpl")
+	tp.ParseFiles("diff", "layout.tmpl", "diff.tmpl")
 
 	static, err := fs.Sub(staticFS, "static")
 	if err != nil {
@@ -102,36 +140,64 @@ func New(cfg *config.Config, sessions *sessionstore.Store, hist *history.Store, 
 	}
 
 	mux := http.NewServeMux()
+	// Public
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(static))))
-	mux.Handle("GET /{$}", hime.Handler(s.dashboard))
-	mux.Handle("GET /history", hime.Handler(s.historyList))
-	mux.Handle("GET /history/{threadID}", hime.Handler(s.historyDetail))
-	mux.Handle("GET /ship", hime.Handler(s.shipPage))
-	mux.Handle("GET /worktrees", hime.Handler(s.worktreesPage))
-	mux.Handle("POST /worktrees/prune", hime.Handler(s.pruneWorktree))
-	mux.Handle("POST /worktrees/prune-idle", hime.Handler(s.pruneIdleWorktrees))
-	mux.Handle("GET /config", hime.Handler(s.configPage))
-	mux.Handle("POST /config/projects", hime.Handler(s.addProject))
-	mux.Handle("POST /config/projects/remove", hime.Handler(s.removeProject))
-	mux.Handle("POST /config/projects/linear", hime.Handler(s.setProjectLinear))
-	mux.Handle("POST /config/users", hime.Handler(s.addUser))
-	mux.Handle("POST /config/users/remove", hime.Handler(s.removeUser))
-	mux.Handle("POST /config/roles", hime.Handler(s.addRole))
-	mux.Handle("POST /config/roles/remove", hime.Handler(s.removeRole))
-	mux.Handle("POST /config/channels", hime.Handler(s.addChannel))
-	mux.Handle("POST /config/channels/remove", hime.Handler(s.removeChannel))
-	mux.Handle("POST /config/settings", hime.Handler(s.updateSettings))
-	// Domain partials for change-aware live updates.
-	mux.Handle("GET /partials/dashboard/stats", hime.Handler(s.partialDashboardStats))
-	mux.Handle("GET /partials/dashboard/runs", hime.Handler(s.partialDashboardRuns))
-	mux.Handle("GET /partials/ship/stats", hime.Handler(s.partialShipStats))
-	mux.Handle("GET /partials/ship/digest", hime.Handler(s.partialShipDigest))
-	mux.Handle("GET /partials/ship/table", hime.Handler(s.partialShipTable))
-	mux.Handle("GET /partials/history/table", hime.Handler(s.partialHistoryTable))
-	mux.Handle("GET /partials/history/turns/{threadID}", hime.Handler(s.partialHistoryTurns))
-	mux.Handle("GET /partials/worktrees/table", hime.Handler(s.partialWorktreesTable))
-	mux.Handle("GET /partials/config/lists", hime.Handler(s.partialConfigLists))
-	mux.Handle("GET /events", http.HandlerFunc(s.sse))
+	mux.Handle("GET /login", hime.Handler(s.loginPage))
+	mux.Handle("GET /auth/discord", hime.Handler(s.oauthDiscordStart))
+	mux.Handle("GET /auth/discord/callback", hime.Handler(s.oauthDiscordCallback))
+	mux.Handle("POST /logout", hime.Handler(s.logout))
+
+	// Authenticated pages + SSE + partials
+	mux.Handle("GET /{$}", s.requireAuth(hime.Handler(s.dashboard)))
+	mux.Handle("GET /history", s.requireAuth(hime.Handler(s.historyList)))
+	mux.Handle("GET /history/{threadID}", s.requireAuth(hime.Handler(s.historyDetail)))
+	mux.Handle("GET /ship", s.requireAuth(hime.Handler(s.shipPage)))
+	mux.Handle("GET /worktrees", s.requireAuth(hime.Handler(s.worktreesPage)))
+	mux.Handle("GET /config", s.requireAuth(hime.Handler(s.configPage)))
+	mux.Handle("GET /issues", s.requireAuth(hime.Handler(s.issuesIndex)))
+	mux.Handle("GET /projects/{project}/issues", s.requireAuth(hime.Handler(s.issuesList)))
+	mux.Handle("GET /projects/{project}/issues/{n}", s.requireAuth(hime.Handler(s.issueDetail)))
+	mux.Handle("GET /projects/{project}/linear", s.requireAuth(hime.Handler(s.linearList)))
+	mux.Handle("GET /projects/{project}/linear/{identifier}", s.requireAuth(hime.Handler(s.linearDetail)))
+	mux.Handle("GET /prs/{owner}/{repo}/{n}", s.requireAuth(hime.Handler(s.prDetail)))
+	mux.Handle("GET /prs/{owner}/{repo}/{n}/diff", s.requireAuth(hime.Handler(s.prDiffPage)))
+	mux.Handle("GET /sessions/{threadID}/diff", s.requireAuth(hime.Handler(s.sessionDiffPage)))
+	// GitHub writes (PR8–9): always registered; request-time feature + role gates.
+	mux.Handle("POST /projects/{project}/issues/{n}/comments",
+		s.requireFeature("githubWrites", s.requireMember(hime.Handler(s.postIssueComment))))
+	mux.Handle("POST /prs/{owner}/{repo}/{n}/comments",
+		s.requireFeature("githubWrites", s.requireMember(hime.Handler(s.postPRComment))))
+	mux.Handle("POST /prs/{owner}/{repo}/{n}/close",
+		s.requireFeature("githubWrites", s.requireMember(hime.Handler(s.postPRClose))))
+	mux.Handle("POST /prs/{owner}/{repo}/{n}/merge",
+		s.requireFeature("merge", s.requireAdmin(hime.Handler(s.postPRMerge))))
+	mux.Handle("GET /events", s.requireAuth(http.HandlerFunc(s.sse)))
+	mux.Handle("GET /partials/dashboard/stats", s.requireAuth(hime.Handler(s.partialDashboardStats)))
+	mux.Handle("GET /partials/dashboard/runs", s.requireAuth(hime.Handler(s.partialDashboardRuns)))
+	mux.Handle("GET /partials/ship/stats", s.requireAuth(hime.Handler(s.partialShipStats)))
+	mux.Handle("GET /partials/ship/digest", s.requireAuth(hime.Handler(s.partialShipDigest)))
+	mux.Handle("GET /partials/ship/table", s.requireAuth(hime.Handler(s.partialShipTable)))
+	mux.Handle("GET /partials/history/table", s.requireAuth(hime.Handler(s.partialHistoryTable)))
+	mux.Handle("GET /partials/history/turns/{threadID}", s.requireAuth(hime.Handler(s.partialHistoryTurns)))
+	mux.Handle("GET /partials/worktrees/table", s.requireAuth(hime.Handler(s.partialWorktreesTable)))
+	mux.Handle("GET /partials/config/lists", s.requireAuth(hime.Handler(s.partialConfigLists)))
+
+	// Admin + CSRF mutations (no-op gates when auth disabled)
+	mux.Handle("POST /worktrees/prune", s.requireAdmin(hime.Handler(s.pruneWorktree)))
+	mux.Handle("POST /worktrees/prune-idle", s.requireAdmin(hime.Handler(s.pruneIdleWorktrees)))
+	mux.Handle("POST /config/projects", s.requireAdmin(hime.Handler(s.addProject)))
+	mux.Handle("POST /config/projects/remove", s.requireAdmin(hime.Handler(s.removeProject)))
+	mux.Handle("POST /config/projects/linear", s.requireAdmin(hime.Handler(s.setProjectLinear)))
+	mux.Handle("POST /config/projects/github", s.requireAdmin(hime.Handler(s.setProjectGitHub)))
+	mux.Handle("POST /config/projects/channel", s.requireAdmin(hime.Handler(s.setProjectChannel)))
+	mux.Handle("POST /config/guild", s.requireAdmin(hime.Handler(s.setGuild)))
+	mux.Handle("POST /config/users", s.requireAdmin(hime.Handler(s.addUser)))
+	mux.Handle("POST /config/users/remove", s.requireAdmin(hime.Handler(s.removeUser)))
+	mux.Handle("POST /config/roles", s.requireAdmin(hime.Handler(s.addRole)))
+	mux.Handle("POST /config/roles/remove", s.requireAdmin(hime.Handler(s.removeRole)))
+	mux.Handle("POST /config/channels", s.requireAdmin(hime.Handler(s.addChannel)))
+	mux.Handle("POST /config/channels/remove", s.requireAdmin(hime.Handler(s.removeChannel)))
+	mux.Handle("POST /config/settings", s.requireAdmin(hime.Handler(s.updateSettings)))
 
 	app.Handler(mux)
 	s.app = app
@@ -161,6 +227,9 @@ type pageData struct {
 	IsShip      bool
 	IsWorktrees bool
 	IsConfig    bool
+	IsLogin     bool
+	IsIssues    bool
+	IsLinear    bool
 	Flash       string
 	Error       string
 	Status      bot.StatusSnapshot
@@ -171,10 +240,69 @@ type pageData struct {
 	IdleTTLDays int
 	Config      config.Snapshot
 	SSEPath     string
+	// Auth chrome
+	AuthEnabled bool
+	CSRF        string
+	UserName    string
+	UserRole    string
+	UserID      string
+	LoginNext   string
+	// Workflow read UI (PR4–7)
+	Project       string
+	RepoCatalog   []config.GitHubRepoRef
+	ActiveOwner   string
+	ActiveRepo    string
+	IssueState    string
+	Issues        []ghpr.IssueInfo
+	Issue         ghpr.IssueInfo
+	LinearEnabled bool
+	LinearTeam    string
+	LinearIssues  []linear.Issue
+	LinearIssue   linear.Issue
+	PR            ghpr.PRDetail
+	PRNumber      int
+	Diff          ghpr.Diff
+	DiffBase      string
+	ThreadID      string
+	// Write UI flags (from config snapshot + session)
+	CanGitHubWrite bool
+	CanMerge       bool
+	WebMergeMethod string
 }
 
 func (s *Server) basePage(ctx *hime.Context) pageData {
-	return pageData{SSEPath: ctx.Route("sse")}
+	d := pageData{
+		SSEPath:        ctx.Route("sse"),
+		AuthEnabled:    s.cfg.WebAuthEnabled(),
+		WebMergeMethod: s.cfg.WebMergeMethodValue(),
+	}
+	// Write affordances: feature on + (auth off never enables Feature*; auth on needs role).
+	d.CanGitHubWrite = s.cfg.FeatureGitHubWrites()
+	d.CanMerge = s.cfg.FeatureMerge()
+	if !d.AuthEnabled {
+		return d
+	}
+	sess := sessionFromContext(ctx.Context())
+	if sess == nil {
+		sess = s.sessionFromRequest(ctx.Request)
+	}
+	if sess != nil {
+		d.CSRF = sess.CSRF
+		d.UserName = sess.DisplayName
+		d.UserID = sess.DiscordUserID
+		d.UserRole = string(sess.Role)
+		// Gate UI by role (handlers still enforce).
+		if !config.RoleAtLeast(sess.Role, config.WebRoleMember) {
+			d.CanGitHubWrite = false
+		}
+		if !config.RoleAtLeast(sess.Role, config.WebRoleAdmin) {
+			d.CanMerge = false
+		}
+	} else {
+		d.CanGitHubWrite = false
+		d.CanMerge = false
+	}
+	return d
 }
 
 // viewPage renders a full layout document. Admin UI is always live/private data.
@@ -350,6 +478,7 @@ func (s *Server) worktreesRedirect(ctx *hime.Context, okMsg string, err error) e
 func (s *Server) pruneWorktree(ctx *hime.Context) error {
 	threadID := ctx.PostFormValue("threadId")
 	err := s.bot.PruneWorktree(threadID)
+	s.auditAction(ctx, audit.ActionWorktreePrune, err, map[string]any{"threadId": threadID})
 	if err != nil {
 		return s.worktreesRedirect(ctx, "", err)
 	}
@@ -358,6 +487,7 @@ func (s *Server) pruneWorktree(ctx *hime.Context) error {
 
 func (s *Server) pruneIdleWorktrees(ctx *hime.Context) error {
 	n, err := s.bot.PruneIdleNow()
+	s.auditAction(ctx, audit.ActionWorktreePruneIdle, err, map[string]any{"count": n})
 	if err != nil {
 		return s.worktreesRedirect(ctx, "", err)
 	}
@@ -374,12 +504,16 @@ func (s *Server) configRedirect(ctx *hime.Context, okMsg string, err error) erro
 func (s *Server) addProject(ctx *hime.Context) error {
 	name := ctx.PostFormValue("name")
 	path := ctx.PostFormValue("path")
-	return s.configRedirect(ctx, fmt.Sprintf("Added project %q", name), s.cfg.AddProject(name, path))
+	err := s.cfg.AddProject(name, path)
+	s.auditAction(ctx, audit.ActionConfigAddProject, err, map[string]any{"name": name})
+	return s.configRedirect(ctx, fmt.Sprintf("Added project %q", name), err)
 }
 
 func (s *Server) removeProject(ctx *hime.Context) error {
 	name := ctx.PostFormValue("name")
-	return s.configRedirect(ctx, fmt.Sprintf("Removed project %q", name), s.cfg.RemoveProject(name))
+	err := s.cfg.RemoveProject(name)
+	s.auditAction(ctx, audit.ActionConfigRemoveProject, err, map[string]any{"name": name})
+	return s.configRedirect(ctx, fmt.Sprintf("Removed project %q", name), err)
 }
 
 func (s *Server) setProjectLinear(ctx *hime.Context) error {
@@ -389,38 +523,86 @@ func (s *Server) setProjectLinear(ctx *hime.Context) error {
 	teamKey := ctx.PostFormValue("teamKey")
 	apiKey := ctx.PostFormValue("apiKey")
 	err := s.cfg.SetProjectLinear(name, enabled, teamKey, apiKey, clearKey)
+	s.auditAction(ctx, audit.ActionConfigSetLinear, err, map[string]any{"name": name, "enabled": enabled})
 	return s.configRedirect(ctx, fmt.Sprintf("Updated Linear for project %q", name), err)
+}
+
+func (s *Server) setProjectGitHub(ctx *hime.Context) error {
+	name := ctx.PostFormValue("name")
+	text := ctx.PostFormValue("repos")
+	var repos []config.GitHubRepoRef
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		parts := strings.SplitN(line, "/", 2)
+		if len(parts) != 2 {
+			return s.configRedirect(ctx, "", fmt.Errorf("invalid repo line %q (want owner/repo)", line))
+		}
+		repos = append(repos, config.GitHubRepoRef{Owner: strings.TrimSpace(parts[0]), Repo: strings.TrimSpace(parts[1])})
+	}
+	err := s.cfg.SetProjectGitHubRepos(name, repos)
+	s.auditAction(ctx, "config.set_project_github", err, map[string]any{"name": name, "count": len(repos)})
+	return s.configRedirect(ctx, fmt.Sprintf("Updated GitHub repos for project %q", name), err)
+}
+
+func (s *Server) setProjectChannel(ctx *hime.Context) error {
+	name := ctx.PostFormValue("name")
+	channelID := ctx.PostFormValue("channelId")
+	err := s.cfg.SetProjectDiscordChannel(name, channelID)
+	s.auditAction(ctx, "config.set_project_channel", err, map[string]any{"name": name, "channelId": channelID})
+	return s.configRedirect(ctx, fmt.Sprintf("Updated preferred channel for project %q", name), err)
+}
+
+func (s *Server) setGuild(ctx *hime.Context) error {
+	id := ctx.PostFormValue("discordGuildId")
+	err := s.cfg.SetDiscordGuildID(id)
+	s.auditAction(ctx, "config.set_guild", err, map[string]any{"guildId": id})
+	return s.configRedirect(ctx, "Updated Discord guild id", err)
 }
 
 func (s *Server) addUser(ctx *hime.Context) error {
 	id := ctx.PostFormValue("id")
-	return s.configRedirect(ctx, fmt.Sprintf("Added user %s", id), s.cfg.AddAllowedUser(id))
+	err := s.cfg.AddAllowedUser(id)
+	s.auditAction(ctx, audit.ActionConfigAddUser, err, map[string]any{"id": id})
+	return s.configRedirect(ctx, fmt.Sprintf("Added user %s", id), err)
 }
 
 func (s *Server) removeUser(ctx *hime.Context) error {
 	id := ctx.PostFormValue("id")
-	return s.configRedirect(ctx, fmt.Sprintf("Removed user %s", id), s.cfg.RemoveAllowedUser(id))
+	err := s.cfg.RemoveAllowedUser(id)
+	s.auditAction(ctx, audit.ActionConfigRemoveUser, err, map[string]any{"id": id})
+	return s.configRedirect(ctx, fmt.Sprintf("Removed user %s", id), err)
 }
 
 func (s *Server) addRole(ctx *hime.Context) error {
 	id := ctx.PostFormValue("id")
-	return s.configRedirect(ctx, fmt.Sprintf("Added role %s", id), s.cfg.AddAllowedRole(id))
+	err := s.cfg.AddAllowedRole(id)
+	s.auditAction(ctx, audit.ActionConfigAddRole, err, map[string]any{"id": id})
+	return s.configRedirect(ctx, fmt.Sprintf("Added role %s", id), err)
 }
 
 func (s *Server) removeRole(ctx *hime.Context) error {
 	id := ctx.PostFormValue("id")
-	return s.configRedirect(ctx, fmt.Sprintf("Removed role %s", id), s.cfg.RemoveAllowedRole(id))
+	err := s.cfg.RemoveAllowedRole(id)
+	s.auditAction(ctx, audit.ActionConfigRemoveRole, err, map[string]any{"id": id})
+	return s.configRedirect(ctx, fmt.Sprintf("Removed role %s", id), err)
 }
 
 func (s *Server) addChannel(ctx *hime.Context) error {
 	channelID := ctx.PostFormValue("channelId")
 	project := ctx.PostFormValue("project")
-	return s.configRedirect(ctx, fmt.Sprintf("Mapped channel %s → %s", channelID, project), s.cfg.AddChannel(channelID, project))
+	err := s.cfg.AddChannel(channelID, project)
+	s.auditAction(ctx, audit.ActionConfigAddChannel, err, map[string]any{"channelId": channelID, "project": project})
+	return s.configRedirect(ctx, fmt.Sprintf("Mapped channel %s → %s", channelID, project), err)
 }
 
 func (s *Server) removeChannel(ctx *hime.Context) error {
 	channelID := ctx.PostFormValue("channelId")
-	return s.configRedirect(ctx, fmt.Sprintf("Removed channel %s", channelID), s.cfg.RemoveChannel(channelID))
+	err := s.cfg.RemoveChannel(channelID)
+	s.auditAction(ctx, audit.ActionConfigRemoveChannel, err, map[string]any{"channelId": channelID})
+	return s.configRedirect(ctx, fmt.Sprintf("Removed channel %s", channelID), err)
 }
 
 func (s *Server) updateSettings(ctx *hime.Context) error {
@@ -438,131 +620,188 @@ func (s *Server) updateSettings(ctx *hime.Context) error {
 		}
 	}
 
+	var err error
 	switch section {
 	case "ci":
-		return s.updateCISettings(ctx)
+		err = s.updateCISettingsErr(ctx)
 	case "risky":
-		return s.updateRiskyPathSettings(ctx)
+		err = s.updateRiskyPathSettingsErr(ctx)
 	case "worktree":
-		return s.updateWorktreeSettings(ctx)
+		err = s.updateWorktreeSettingsErr(ctx)
 	case "run":
-		return s.updateRunSettings(ctx)
+		err = s.updateRunSettingsErr(ctx)
 	case "board":
-		return s.updateBoardSettings(ctx)
+		err = s.updateBoardSettingsErr(ctx)
 	default:
-		return s.configRedirect(ctx, "", fmt.Errorf("unknown settings section %q", section))
+		err = fmt.Errorf("unknown settings section %q", section)
+	}
+	s.auditAction(ctx, audit.ActionConfigSettings, err, map[string]any{"section": section})
+	if err != nil {
+		return s.configRedirect(ctx, "", err)
+	}
+	// Success messages match previous helpers.
+	switch section {
+	case "ci":
+		enabled := ctx.PostFormValue("autoFixCI") == "1" || strings.EqualFold(ctx.PostFormValue("autoFixCI"), "on")
+		rawMax := strings.TrimSpace(ctx.PostFormValue("autoFixCIMax"))
+		maxAttempts, _ := strconv.Atoi(rawMax)
+		msg := "Auto CI fix disabled"
+		if enabled {
+			msg = fmt.Sprintf("Auto CI fix enabled (max %d attempt(s) per thread)", maxAttempts)
+		}
+		return s.configRedirect(ctx, msg, nil)
+	case "risky":
+		useDefault := ctx.PostFormValue("riskyPathUseDefault") == "1" ||
+			strings.EqualFold(ctx.PostFormValue("riskyPathUseDefault"), "on")
+		text := ctx.PostFormValue("riskyPathGlobs")
+		msg := "Risky path globs set to built-in defaults"
+		if !useDefault {
+			n := 0
+			for _, line := range strings.Split(text, "\n") {
+				line = strings.TrimSpace(line)
+				if line != "" && !strings.HasPrefix(line, "#") {
+					n++
+				}
+			}
+			if n == 0 {
+				msg = "Risky path flags disabled (empty custom list)"
+			} else {
+				msg = fmt.Sprintf("Saved %d risky path glob(s)", n)
+			}
+		}
+		return s.configRedirect(ctx, msg, nil)
+	case "worktree":
+		raw := strings.TrimSpace(ctx.PostFormValue("worktreeIdleTTLDays"))
+		days, _ := strconv.Atoi(raw)
+		msg := fmt.Sprintf("Worktree idle TTL set to %d day(s)", days)
+		if days == 0 {
+			msg = "Worktree idle cleanup disabled"
+		}
+		return s.configRedirect(ctx, msg, nil)
+	case "run":
+		maxTurns, _ := strconv.Atoi(strings.TrimSpace(ctx.PostFormValue("maxTurns")))
+		timeoutMs, _ := strconv.Atoi(strings.TrimSpace(ctx.PostFormValue("timeoutMs")))
+		mins := float64(timeoutMs) / 60000
+		msg := fmt.Sprintf("Grok run limits: maxTurns=%d, timeoutMs=%d (%.1f min)", maxTurns, timeoutMs, mins)
+		return s.configRedirect(ctx, msg, nil)
+	case "board":
+		days, _ := strconv.Atoi(strings.TrimSpace(ctx.PostFormValue("boardStaleDays")))
+		channel := strings.TrimSpace(ctx.PostFormValue("boardDigestChannel"))
+		msg := fmt.Sprintf("Board stale threshold set to %d day(s)", days)
+		if channel == "" {
+			msg += "; nightly digest disabled"
+		} else {
+			msg += fmt.Sprintf("; digest channel %s", channel)
+		}
+		return s.configRedirect(ctx, msg, nil)
+	default:
+		return s.configRedirect(ctx, "Settings saved", nil)
 	}
 }
 
-func (s *Server) updateRunSettings(ctx *hime.Context) error {
+func (s *Server) updateRunSettingsErr(ctx *hime.Context) error {
 	rawTurns := strings.TrimSpace(ctx.PostFormValue("maxTurns"))
 	rawTimeout := strings.TrimSpace(ctx.PostFormValue("timeoutMs"))
 	if rawTurns == "" {
-		return s.configRedirect(ctx, "", fmt.Errorf("maxTurns is required"))
+		return fmt.Errorf("maxTurns is required")
 	}
 	if rawTimeout == "" {
-		return s.configRedirect(ctx, "", fmt.Errorf("timeoutMs is required"))
+		return fmt.Errorf("timeoutMs is required")
 	}
 	maxTurns, err := strconv.Atoi(rawTurns)
 	if err != nil {
-		return s.configRedirect(ctx, "", fmt.Errorf("maxTurns must be an integer"))
+		return fmt.Errorf("maxTurns must be an integer")
 	}
 	timeoutMs, err := strconv.Atoi(rawTimeout)
 	if err != nil {
-		return s.configRedirect(ctx, "", fmt.Errorf("timeoutMs must be an integer"))
+		return fmt.Errorf("timeoutMs must be an integer")
 	}
-	if err := s.cfg.SetGrokRunLimits(maxTurns, timeoutMs); err != nil {
-		return s.configRedirect(ctx, "", err)
-	}
-	mins := float64(timeoutMs) / 60000
-	msg := fmt.Sprintf("Grok run limits: maxTurns=%d, timeoutMs=%d (%.1f min)", maxTurns, timeoutMs, mins)
-	return s.configRedirect(ctx, msg, nil)
+	return s.cfg.SetGrokRunLimits(maxTurns, timeoutMs)
 }
 
-func (s *Server) updateCISettings(ctx *hime.Context) error {
+func (s *Server) updateCISettingsErr(ctx *hime.Context) error {
 	enabled := ctx.PostFormValue("autoFixCI") == "1" || strings.EqualFold(ctx.PostFormValue("autoFixCI"), "on")
 	rawMax := strings.TrimSpace(ctx.PostFormValue("autoFixCIMax"))
 	if rawMax == "" {
-		return s.configRedirect(ctx, "", fmt.Errorf("autoFixCIMax is required"))
+		return fmt.Errorf("autoFixCIMax is required")
 	}
 	maxAttempts, err := strconv.Atoi(rawMax)
 	if err != nil {
-		return s.configRedirect(ctx, "", fmt.Errorf("autoFixCIMax must be an integer"))
+		return fmt.Errorf("autoFixCIMax must be an integer")
 	}
-	if err := s.cfg.SetAutoFixCI(enabled, maxAttempts); err != nil {
-		return s.configRedirect(ctx, "", err)
-	}
-	msg := "Auto CI fix disabled"
-	if enabled {
-		msg = fmt.Sprintf("Auto CI fix enabled (max %d attempt(s) per thread)", maxAttempts)
-	}
-	return s.configRedirect(ctx, msg, nil)
+	return s.cfg.SetAutoFixCI(enabled, maxAttempts)
 }
 
-func (s *Server) updateRiskyPathSettings(ctx *hime.Context) error {
+func (s *Server) updateRiskyPathSettingsErr(ctx *hime.Context) error {
 	useDefault := ctx.PostFormValue("riskyPathUseDefault") == "1" ||
 		strings.EqualFold(ctx.PostFormValue("riskyPathUseDefault"), "on")
 	text := ctx.PostFormValue("riskyPathGlobs")
-	if err := s.cfg.SetRiskyPathGlobsFromText(text, useDefault); err != nil {
-		return s.configRedirect(ctx, "", err)
-	}
-	msg := "Risky path globs set to built-in defaults"
-	if !useDefault {
-		n := 0
-		for _, line := range strings.Split(text, "\n") {
-			line = strings.TrimSpace(line)
-			if line != "" && !strings.HasPrefix(line, "#") {
-				n++
-			}
-		}
-		if n == 0 {
-			msg = "Risky path flags disabled (empty custom list)"
-		} else {
-			msg = fmt.Sprintf("Saved %d risky path glob(s)", n)
-		}
-	}
-	return s.configRedirect(ctx, msg, nil)
+	return s.cfg.SetRiskyPathGlobsFromText(text, useDefault)
 }
 
-func (s *Server) updateWorktreeSettings(ctx *hime.Context) error {
+func (s *Server) updateWorktreeSettingsErr(ctx *hime.Context) error {
 	raw := strings.TrimSpace(ctx.PostFormValue("worktreeIdleTTLDays"))
 	if raw == "" {
-		return s.configRedirect(ctx, "", fmt.Errorf("worktreeIdleTTLDays is required"))
+		return fmt.Errorf("worktreeIdleTTLDays is required")
 	}
 	days, err := strconv.Atoi(raw)
 	if err != nil {
-		return s.configRedirect(ctx, "", fmt.Errorf("worktreeIdleTTLDays must be an integer"))
+		return fmt.Errorf("worktreeIdleTTLDays must be an integer")
 	}
-	if err := s.cfg.SetWorktreeIdleTTLDays(days); err != nil {
-		return s.configRedirect(ctx, "", err)
-	}
-	msg := fmt.Sprintf("Worktree idle TTL set to %d day(s)", days)
-	if days == 0 {
-		msg = "Worktree idle cleanup disabled"
-	}
-	return s.configRedirect(ctx, msg, nil)
+	return s.cfg.SetWorktreeIdleTTLDays(days)
 }
 
-func (s *Server) updateBoardSettings(ctx *hime.Context) error {
+func (s *Server) updateBoardSettingsErr(ctx *hime.Context) error {
 	rawDays := strings.TrimSpace(ctx.PostFormValue("boardStaleDays"))
 	if rawDays == "" {
-		return s.configRedirect(ctx, "", fmt.Errorf("boardStaleDays is required"))
+		return fmt.Errorf("boardStaleDays is required")
 	}
 	days, err := strconv.Atoi(rawDays)
 	if err != nil {
-		return s.configRedirect(ctx, "", fmt.Errorf("boardStaleDays must be an integer"))
+		return fmt.Errorf("boardStaleDays must be an integer")
 	}
 	channel := strings.TrimSpace(ctx.PostFormValue("boardDigestChannel"))
-	if err := s.cfg.SetBoardSettings(days, channel); err != nil {
-		return s.configRedirect(ctx, "", err)
+	return s.cfg.SetBoardSettings(days, channel)
+}
+
+// auditAction records a web mutation (auth-off → actor anonymous).
+func (s *Server) auditAction(ctx *hime.Context, action string, err error, detail map[string]any) {
+	if s == nil || s.audit == nil {
+		return
 	}
-	msg := fmt.Sprintf("Board stale threshold set to %d day(s)", days)
-	if channel == "" {
-		msg += "; nightly digest disabled"
-	} else {
-		msg += fmt.Sprintf("; digest channel %s", channel)
+	actor, role := s.auditActor(ctx)
+	ev := audit.Event{
+		Action: action,
+		Actor:  actor,
+		Role:   role,
+		Detail: detail,
+		OK:     err == nil,
 	}
-	return s.configRedirect(ctx, msg, nil)
+	if err != nil {
+		ev.Error = err.Error()
+	}
+	_ = s.audit.Append(ev)
+}
+
+func (s *Server) auditActor(ctx *hime.Context) (actor, role string) {
+	if ctx == nil {
+		return audit.ActorAnonymous, ""
+	}
+	sess := sessionFromContext(ctx.Context())
+	if sess == nil {
+		sess = s.sessionFromRequest(ctx.Request)
+	}
+	if sess == nil {
+		return audit.ActorAnonymous, ""
+	}
+	actor = sess.DiscordUserID
+	if actor == "" {
+		actor = sess.DisplayName
+	}
+	if actor == "" {
+		actor = audit.ActorAnonymous
+	}
+	return actor, string(sess.Role)
 }
 
 // mergeSessionRows adds session-store threads that have no history turns yet.

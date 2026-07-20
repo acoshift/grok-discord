@@ -1,0 +1,13 @@
+{{define "content"}}
+<h1 id="page-linear-detail">{{.LinearIssue.Identifier}}</h1>
+<p class="sub">
+  <a href="/projects/{{.Project}}/linear">← Linear list</a>
+  {{if .LinearIssue.URL}} · <a href="{{.LinearIssue.URL}}" target="_blank" rel="noopener">Open in Linear</a>{{end}}
+</p>
+{{if .Error}}<div class="flash err">{{.Error}}</div>{{end}}
+<div class="section card">
+  <h2>{{.LinearIssue.Title}}</h2>
+  <p class="sub" style="margin:0"><span class="badge">{{.LinearIssue.State}}</span> · team <span class="mono">{{.LinearIssue.TeamKey}}</span></p>
+  <pre class="bubble-body" style="margin-top:1rem;white-space:pre-wrap;">{{.LinearIssue.Description}}</pre>
+</div>
+{{end}}

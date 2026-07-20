@@ -17,8 +17,10 @@ type ProjectLinearConfig struct {
 
 // ProjectConfig is one named project entry (path + optional integrations).
 type ProjectConfig struct {
-	Path   string               `json:"path"`
-	Linear *ProjectLinearConfig `json:"linear,omitempty"`
+	Path             string               `json:"path"`
+	DiscordChannelID string               `json:"discordChannelId,omitempty"` // preferred channel for web-created threads
+	GitHub           *ProjectGitHubConfig `json:"github,omitempty"`
+	Linear           *ProjectLinearConfig `json:"linear,omitempty"`
 }
 
 // ProjectsMap is project name → config. JSON accepts either a path string or a full object.
@@ -60,9 +62,21 @@ func (m *ProjectsMap) UnmarshalJSON(b []byte) error {
 			return fmt.Errorf("projects[%q]: path is required", name)
 		}
 		pc.Path = strings.TrimSpace(pc.Path)
+		pc.DiscordChannelID = strings.TrimSpace(pc.DiscordChannelID)
 		if pc.Linear != nil {
 			pc.Linear.TeamKey = strings.TrimSpace(pc.Linear.TeamKey)
 			pc.Linear.APIKey = strings.TrimSpace(pc.Linear.APIKey)
+		}
+		if pc.GitHub != nil {
+			for i := range pc.GitHub.Repos {
+				pc.GitHub.Repos[i].Owner = strings.TrimSpace(pc.GitHub.Repos[i].Owner)
+				pc.GitHub.Repos[i].Repo = strings.TrimSpace(pc.GitHub.Repos[i].Repo)
+			}
+			pc.GitHub.Owner = strings.TrimSpace(pc.GitHub.Owner)
+			pc.GitHub.Repo = strings.TrimSpace(pc.GitHub.Repo)
+			if len(pc.GitHub.NormalizedRepos()) == 0 {
+				pc.GitHub = nil
+			}
 		}
 		out[name] = pc
 	}
@@ -74,14 +88,21 @@ func (m ProjectsMap) MarshalJSON() ([]byte, error) {
 	if m == nil {
 		return []byte("null"), nil
 	}
-	// Always write object form so Linear fields round-trip.
+	// Always write object form so Linear/GitHub fields round-trip.
 	type outObj struct {
-		Path   string               `json:"path"`
-		Linear *ProjectLinearConfig `json:"linear,omitempty"`
+		Path             string               `json:"path"`
+		DiscordChannelID string               `json:"discordChannelId,omitempty"`
+		GitHub           *ProjectGitHubConfig `json:"github,omitempty"`
+		Linear           *ProjectLinearConfig `json:"linear,omitempty"`
 	}
 	out := make(map[string]outObj, len(m))
 	for name, pc := range m {
-		out[name] = outObj{Path: pc.Path, Linear: cloneProjectLinear(pc.Linear)}
+		out[name] = outObj{
+			Path:             pc.Path,
+			DiscordChannelID: pc.DiscordChannelID,
+			GitHub:           cloneProjectGitHub(pc.GitHub),
+			Linear:           cloneProjectLinear(pc.Linear),
+		}
 	}
 	return json.Marshal(out)
 }
@@ -101,8 +122,10 @@ func cloneProjectsMap(m ProjectsMap) ProjectsMap {
 	out := make(ProjectsMap, len(m))
 	for k, v := range m {
 		out[k] = ProjectConfig{
-			Path:   v.Path,
-			Linear: cloneProjectLinear(v.Linear),
+			Path:             v.Path,
+			DiscordChannelID: v.DiscordChannelID,
+			GitHub:           cloneProjectGitHub(v.GitHub),
+			Linear:           cloneProjectLinear(v.Linear),
 		}
 	}
 	return out

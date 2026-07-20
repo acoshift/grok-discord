@@ -1,0 +1,15 @@
+{{define "content"}}
+<div class="section" id="page-login" style="max-width: 28rem; margin: 2rem auto;">
+  <h1>Log in</h1>
+  <p class="sub">Sign in with Discord to use this private Grok Work admin UI.</p>
+  {{if .Error}}
+  <div class="flash err">{{.Error}}</div>
+  {{end}}
+  <div class="card" style="margin-top: 1rem;">
+    <p class="sub" style="margin-top:0">Only operators listed as web admins/members/viewers or on the bot allowlist can continue after Discord login.</p>
+    <p style="margin: 1rem 0 0;">
+      <a class="btn" href="{{route "auth.discord"}}{{if .LoginNext}}?next={{urlquery .LoginNext}}{{end}}">Log in with Discord</a>
+    </p>
+  </div>
+</div>
+{{end}}

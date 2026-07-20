@@ -17,6 +17,7 @@
     Run a one-shot prune of worktrees past that threshold.
   </p>
   <form method="post" action="{{route "worktrees.pruneIdle"}}" onsubmit="return confirm('Prune all worktrees idle longer than {{.IdleTTLDays}} day(s)?');">
+    {{template "csrf" $}}
     <button type="submit" {{if eq .IdleTTLDays 0}}disabled title="Set worktreeIdleTTLDays &gt; 0 on Config"{{end}}>Prune idle now</button>
   </form>
 </div>
@@ -69,6 +70,7 @@
           <button type="button" class="btn-danger" disabled title="Thread is busy">Prune</button>
           {{else}}
           <form method="post" action="{{route "worktrees.prune"}}" onsubmit="return confirm('Prune worktree for thread {{.ThreadID}}? This removes the worktree, branch, and session.');">
+    {{template "csrf" $}}
             <input type="hidden" name="threadId" value="{{.ThreadID}}">
             <button type="submit" class="btn-danger">Prune</button>
           </form>

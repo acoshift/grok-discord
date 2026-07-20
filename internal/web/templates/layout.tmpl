@@ -592,14 +592,26 @@
     <header class="app">
       <div class="brand">Grok Discord <span>· admin</span></div>
       <div class="header-end">
+        {{if not .IsLogin}}
         <nav>
           <a href="{{route "dashboard"}}" class="{{if .IsDashboard}}active{{end}}">Dashboard</a>
           <a href="{{route "ship"}}" class="{{if .IsShip}}active{{end}}">Ship</a>
+          <a href="{{route "issues"}}" class="{{if or .IsIssues .IsLinear}}active{{end}}">Issues</a>
           <a href="{{route "history"}}" class="{{if .IsHistory}}active{{end}}">History</a>
           <a href="{{route "worktrees"}}" class="{{if .IsWorktrees}}active{{end}}">Worktrees</a>
           <a href="{{route "config"}}" class="{{if .IsConfig}}active{{end}}">Config</a>
         </nav>
+        {{if .AuthEnabled}}
+          {{if .UserName}}
+          <span class="muted" style="font-size:0.85rem;" title="{{.UserID}} · {{.UserRole}}">{{.UserName}}</span>
+          <form method="post" action="{{route "logout"}}" style="margin:0;" hx-boost="false">
+            {{if .CSRF}}<input type="hidden" name="csrf" value="{{.CSRF}}">{{end}}
+            <button type="submit" class="btn btn-secondary" style="height:2rem;font-size:0.82rem;">Log out</button>
+          </form>
+          {{end}}
+        {{end}}
         <span id="sse-status" title="Live updates via SSE">connecting…</span>
+        {{end}}
       </div>
     </header>
     {{/* Page content hosts per-domain live-region partials (sse:dashboard/ship/…).
@@ -749,3 +761,4 @@
 </body>
 </html>
 {{end}}
+{{define "csrf"}}{{if .CSRF}}<input type="hidden" name="csrf" value="{{.CSRF}}">{{end}}{{end}}

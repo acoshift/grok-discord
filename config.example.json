@@ -1,13 +1,21 @@
 {
   "discordToken": "YOUR_BOT_TOKEN",
   "discordClientId": "",
+  "discordClientSecret": "",
   "allowedUserIds": [
     "YOUR_DISCORD_USER_ID"
   ],
   "allowedRoleIds": [],
+  "discordGuildId": "",
   "projects": {
     "app": {
       "path": "/absolute/path/to/app",
+      "discordChannelId": "",
+      "github": {
+        "repos": [
+          { "owner": "your-org", "repo": "app" }
+        ]
+      },
       "linear": {
         "enabled": false,
         "apiKey": "",
@@ -31,6 +39,20 @@
   "worktreeIsolation": true,
   "worktreeIdleTTLDays": 30,
   "httpListen": ":8787",
+  "webPublicBaseURL": "",
+  "webMergeMethod": "squash",
+  "webAuth": {
+    "enabled": false,
+    "sessionSecret": "",
+    "adminDiscordIds": [],
+    "memberDiscordIds": [],
+    "viewerDiscordIds": [],
+    "features": {
+      "githubWrites": false,
+      "merge": false,
+      "startSessions": false
+    }
+  },
   "autoFixCI": false,
   "autoFixCIMax": 2,
   "boardStaleDays": 3,

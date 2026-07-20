@@ -1,0 +1,31 @@
+{{define "content"}}
+<h1 id="page-diff">{{.Title}}</h1>
+<p class="sub">
+  {{if .PRNumber}}
+    <a href="/prs/{{.ActiveOwner}}/{{.ActiveRepo}}/{{.PRNumber}}{{if .Project}}?project={{urlquery .Project}}{{end}}">← PR</a>
+  {{else if .ThreadID}}
+    <a href="/history/{{.ThreadID}}">← History</a>
+    · base <span class="mono">{{.DiffBase}}</span>
+  {{end}}
+  · {{.Diff.FormatStat}}
+  {{if .Diff.Truncated}} · <span class="badge">truncated</span>{{end}}
+</p>
+{{if .Error}}<div class="flash err">{{.Error}}</div>{{end}}
+
+{{if .Diff.Files}}
+  {{range .Diff.Files}}
+  <div class="section card" style="margin-bottom:1rem;">
+    <h2 class="mono" style="font-size:0.95rem;">{{if .PathNew}}{{.PathNew}}{{else}}{{.PathOld}}{{end}}</h2>
+    {{range .Hunks}}
+    <pre class="bubble-body" style="margin-top:0.5rem;font-size:0.8rem;"><code>{{.Header}}
+{{range .Lines}}{{.}}
+{{end}}</code></pre>
+    {{else}}
+    <p class="muted">No hunks (name-only or empty).</p>
+    {{end}}
+  </div>
+  {{end}}
+{{else}}
+  <div class="empty">No diff files.</div>
+{{end}}
+{{end}}

@@ -44,6 +44,7 @@
     Defaults are <span class="mono">40</span> turns and <span class="mono">1800000</span> ms (30 minutes). Applies to new runs only.
   </p>
   <form class="inline" method="post" action="{{route "config.settings"}}" style="grid-template-columns: 1fr 1fr auto;">
+    {{template "csrf" $}}
     <input type="hidden" name="section" value="run">
     <div>
       <label for="max-turns">Max turns</label>
@@ -63,6 +64,7 @@
   <h2>Worktree idle cleanup</h2>
   <p class="sub" style="margin-top:0">Prune per-thread git worktrees after this many days without activity. <span class="mono">0</span> disables automatic cleanup. Default is <span class="mono">30</span>.</p>
   <form class="inline" method="post" action="{{route "config.settings"}}" style="grid-template-columns: 1fr auto;">
+    {{template "csrf" $}}
     <input type="hidden" name="section" value="worktree">
     <div>
       <label for="worktree-idle-ttl">Idle TTL (days)</label>
@@ -79,6 +81,7 @@
     Stale is based on session inactivity. Optional nightly digest posts the board into a Discord channel.
   </p>
   <form class="inline" method="post" action="{{route "config.settings"}}" style="grid-template-columns: 1fr 2fr auto;">
+    {{template "csrf" $}}
     <input type="hidden" name="section" value="board">
     <div>
       <label for="board-stale-days">Stale after (days)</label>
@@ -100,6 +103,7 @@
     Optionally auto-queue a fix (default off). Cap is per Discord thread session.
   </p>
   <form class="inline" method="post" action="{{route "config.settings"}}" style="grid-template-columns: auto 1fr auto;">
+    {{template "csrf" $}}
     <input type="hidden" name="section" value="ci">
     <div>
       <label class="check">
@@ -123,6 +127,7 @@
     One pattern per line; <span class="mono">**</span> and <span class="mono">*</span> supported. Lines starting with <span class="mono">#</span> are comments.
   </p>
   <form method="post" action="{{route "config.settings"}}">
+    {{template "csrf" $}}
     <input type="hidden" name="section" value="risky">
     <div style="margin-bottom: 0.65rem;">
       <label class="check">
@@ -147,6 +152,7 @@
 <div class="section card">
   <h2>Add project folder</h2>
   <form class="inline" method="post" action="{{route "config.addProject"}}">
+    {{template "csrf" $}}
     <div>
       <label for="proj-name">Name</label>
       <input id="proj-name" type="text" name="name" placeholder="myapp" required autocomplete="off">
@@ -160,9 +166,60 @@
 </div>
 
 <div class="section card">
+  <h2>Discord guild id</h2>
+  <p class="sub" style="margin-top:0">Optional. Used later for deep links into Discord threads from the web UI.</p>
+  <form class="inline" method="post" action="{{route "config.setGuild"}}" style="grid-template-columns: 1fr auto;">
+    {{template "csrf" $}}
+    <div>
+      <label for="guild-id">Guild ID</label>
+      <input id="guild-id" type="text" name="discordGuildId" value="{{.Config.DiscordGuildID}}" placeholder="123456789012345678" autocomplete="off">
+    </div>
+    <button type="submit">Save guild</button>
+  </form>
+</div>
+
+<div class="section card">
+  <h2>GitHub repos &amp; preferred channel (per project)</h2>
+  <p class="sub" style="margin:0 0 0.75rem">
+    Multi-repo catalog (one <span class="mono">owner/repo</span> per line). Preferred Discord channel must already be mapped to the project in Channels.
+    Leave repos blank to discover from git remotes.
+  </p>
+  {{range .Config.Projects}}
+  <div style="border-top:1px solid var(--border);padding:0.85rem 0;">
+    <div class="mono" style="font-weight:600;margin-bottom:0.5rem;">{{.Name}}</div>
+    <form method="post" action="{{route "config.setProjectGitHub"}}" style="margin-bottom:0.65rem;">
+      {{template "csrf" $}}
+      <input type="hidden" name="name" value="{{.Name}}">
+      <label for="repos-{{.Name}}">GitHub repos</label>
+      <textarea id="repos-{{.Name}}" name="repos" rows="3" placeholder="acme/app&#10;acme/api">{{.GitHubReposText}}</textarea>
+      <div class="form-actions"><button type="submit">Save repos</button></div>
+    </form>
+    <form class="inline" method="post" action="{{route "config.setProjectChannel"}}" style="grid-template-columns: 1fr auto;">
+      {{template "csrf" $}}
+      <input type="hidden" name="name" value="{{.Name}}">
+      <div>
+        <label for="ch-{{.Name}}">Preferred Discord channel</label>
+        <select id="ch-{{.Name}}" name="channelId">
+          <option value="">(auto / reverse-map)</option>
+          {{$pref := .DiscordChannelID}}
+          {{range .ChannelOptions}}
+          <option value="{{.}}" {{if eq . $pref}}selected{{end}}>{{.}}</option>
+          {{end}}
+        </select>
+      </div>
+      <button type="submit">Save channel</button>
+    </form>
+  </div>
+  {{else}}
+  <p class="sub">Add a project first.</p>
+  {{end}}
+</div>
+
+<div class="section card">
   <h2>Linear (per project)</h2>
   <p class="sub" style="margin:0 0 0.75rem">Opt-in ticket binding. API key is per project (different Linear workspaces allowed). Empty API key field leaves the stored key unchanged. Env alternative: <span class="mono">LINEAR_API_KEY_&lt;PROJECT&gt;</span>.</p>
   <form class="inline" method="post" action="{{route "config.setProjectLinear"}}" style="grid-template-columns: 1fr 1fr 1fr 1fr auto; align-items: end;">
+    {{template "csrf" $}}
     <div>
       <label for="lin-project">Project</label>
       <select id="lin-project" name="name" required>
@@ -194,6 +251,7 @@
 <div class="section card">
   <h2>Add channel map</h2>
   <form class="inline" method="post" action="{{route "config.addChannel"}}">
+    {{template "csrf" $}}
     <div>
       <label for="channel-id">Discord channel ID</label>
       <input id="channel-id" type="text" name="channelId" placeholder="123456789012345678" required autocomplete="off">
@@ -217,6 +275,7 @@
 <div class="section card">
   <h2>Add allowed user</h2>
   <form class="inline" method="post" action="{{route "config.addUser"}}" style="grid-template-columns: 1fr auto;">
+    {{template "csrf" $}}
     <div>
       <label for="user-id">Discord user ID</label>
       <input id="user-id" type="text" name="id" placeholder="123456789012345678" required autocomplete="off">
@@ -228,6 +287,7 @@
 <div class="section card">
   <h2>Add allowed role</h2>
   <form class="inline" method="post" action="{{route "config.addRole"}}" style="grid-template-columns: 1fr auto;">
+    {{template "csrf" $}}
     <div>
       <label for="role-id">Discord role ID</label>
       <input id="role-id" type="text" name="id" placeholder="123456789012345678" required autocomplete="off">
@@ -270,6 +330,7 @@
         </td>
         <td class="row-actions">
           <form method="post" action="{{route "config.removeProject"}}" onsubmit="return confirm('Remove project {{.Name}}? Channel maps to this project will also be removed.');">
+    {{template "csrf" $}}
             <input type="hidden" name="name" value="{{.Name}}">
             <button type="submit" class="btn-danger">Remove</button>
           </form>
@@ -297,6 +358,7 @@
         <td>{{.Project}}</td>
         <td class="row-actions">
           <form method="post" action="{{route "config.removeChannel"}}" onsubmit="return confirm('Remove channel {{.ChannelID}}?');">
+    {{template "csrf" $}}
             <input type="hidden" name="channelId" value="{{.ChannelID}}">
             <button type="submit" class="btn-danger">Remove</button>
           </form>
@@ -323,6 +385,7 @@
         <td class="mono">{{.}}</td>
         <td class="row-actions">
           <form method="post" action="{{route "config.removeUser"}}" onsubmit="return confirm('Remove user {{.}}?');">
+    {{template "csrf" $}}
             <input type="hidden" name="id" value="{{.}}">
             <button type="submit" class="btn-danger">Remove</button>
           </form>
@@ -349,6 +412,7 @@
         <td class="mono">{{.}}</td>
         <td class="row-actions">
           <form method="post" action="{{route "config.removeRole"}}" onsubmit="return confirm('Remove role {{.}}?');">
+    {{template "csrf" $}}
             <input type="hidden" name="id" value="{{.}}">
             <button type="submit" class="btn-danger">Remove</button>
           </form>

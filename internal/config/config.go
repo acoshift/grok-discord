@@ -50,26 +50,38 @@ var DefaultRiskyPathGlobs = []string{
 type Config struct {
 	DiscordToken string `json:"discordToken"`
 	// DiscordClientID is optional; when empty the client id is decoded from discordToken.
-	DiscordClientID      string            `json:"discordClientId,omitempty"`
-	AllowedUserIDs       []string          `json:"allowedUserIds"`
-	AllowedRoleIDs       []string          `json:"allowedRoleIds"`
-	Projects             ProjectsMap       `json:"projects"`
-	Channels             map[string]string `json:"channels"` // channel ID → project name
-	GrokBin              string            `json:"grokBin"`
-	Yolo                 *bool             `json:"yolo"`
-	Model                string            `json:"model"`
-	MaxTurns             int               `json:"maxTurns"`
-	TimeoutMs            int               `json:"timeoutMs"`
-	ExtraArgs            []string          `json:"extraArgs"`
-	SummarizeThreadTitle *bool             `json:"summarizeThreadTitle"`
-	SummarizeTimeoutMs   int               `json:"summarizeTimeoutMs"`
-	WorktreeIsolation    *bool             `json:"worktreeIsolation"`
+	DiscordClientID string `json:"discordClientId,omitempty"`
+	// DiscordClientSecret is the OAuth2 client secret for web login (never log).
+	// Prefer env DISCORD_CLIENT_SECRET / GROK_WORK_DISCORD_CLIENT_SECRET.
+	DiscordClientSecret string `json:"discordClientSecret,omitempty"`
+	AllowedUserIDs      []string          `json:"allowedUserIds"`
+	AllowedRoleIDs      []string          `json:"allowedRoleIds"`
+	Projects            ProjectsMap       `json:"projects"`
+	Channels            map[string]string `json:"channels"` // channel ID → project name
+	GrokBin             string            `json:"grokBin"`
+	Yolo                *bool             `json:"yolo"`
+	Model               string            `json:"model"`
+	MaxTurns            int               `json:"maxTurns"`
+	TimeoutMs           int               `json:"timeoutMs"`
+	ExtraArgs           []string          `json:"extraArgs"`
+	SummarizeThreadTitle *bool            `json:"summarizeThreadTitle"`
+	SummarizeTimeoutMs  int               `json:"summarizeTimeoutMs"`
+	WorktreeIsolation   *bool             `json:"worktreeIsolation"`
 	// WorktreeIdleTTLDays is days of inactivity before pruning thread worktrees.
 	// nil/omitted → DefaultWorktreeIdleTTLDays (30). 0 disables idle cleanup.
 	WorktreeIdleTTLDays *int `json:"worktreeIdleTTLDays,omitempty"`
 	// HTTPListen is the address for the private-network web UI (e.g. ":8787", "0.0.0.0:8787").
 	// Empty uses default ":8787". Override with GROK_DISCORD_HTTP_LISTEN.
 	HTTPListen string `json:"httpListen,omitempty"`
+	// WebPublicBaseURL is the absolute public origin for OAuth redirect_uri
+	// (e.g. "http://100.x.y.z:8787"). Required when webAuth.enabled.
+	WebPublicBaseURL string `json:"webPublicBaseURL,omitempty"`
+	// DiscordGuildID is optional; used for Discord deep links from the web UI.
+	DiscordGuildID string `json:"discordGuildId,omitempty"`
+	// WebMergeMethod is the default gh pr merge strategy: squash (default), merge, rebase.
+	WebMergeMethod string `json:"webMergeMethod,omitempty"`
+	// WebAuth enables Discord OAuth for the private web UI. Nil/disabled = open LAN mode.
+	WebAuth *WebAuthConfig `json:"webAuth,omitempty"`
 	// RiskyPathGlobs flags completion-card paths for review (**, * globs).
 	// nil/omitted → built-in defaults. Empty slice → no risk highlighting.
 	RiskyPathGlobs []string `json:"riskyPathGlobs,omitempty"`
@@ -90,16 +102,22 @@ type Config struct {
 	AllowedRoles map[string]struct{} `json:"-"`
 	DataDir      string              `json:"-"`
 	ConfigPath   string              `json:"-"`
+
+	catalogMu    sync.Mutex
+	catalogCache map[string]catalogCacheEntry
 }
 
 // ProjectItem is a project row for the config UI.
 type ProjectItem struct {
-	Name            string
-	Path            string
-	LinearEnabled   bool
-	LinearTeamKey   string
-	LinearAPIKeySet bool   // true when config or env has a key (never expose the secret)
-	LinearEnvHint   string // e.g. LINEAR_API_KEY_HOMECONNECT
+	Name               string
+	Path               string
+	LinearEnabled      bool
+	LinearTeamKey      string
+	LinearAPIKeySet    bool   // true when config or env has a key (never expose the secret)
+	LinearEnvHint      string // e.g. LINEAR_API_KEY_HOMECONNECT
+	DiscordChannelID   string
+	GitHubReposText     string // "owner/repo" lines for config form
+	ChannelOptions     []string // channel IDs mapped to this project (preferred dropdown)
 }
 
 // ChannelItem is a channel→project mapping row for the config UI.
@@ -133,6 +151,14 @@ type Snapshot struct {
 	InviteURL           string
 	InviteError         string
 	InvitePermissions   int64
+	// Web auth (no secrets).
+	WebAuthEnabled bool
+	WebAuthRole    string // empty in snapshot; filled by web layer per-request
+	DiscordGuildID string
+	WebMergeMethod string // effective default (squash)
+	// Feature flags for UI (true only when webAuth enabled + feature bit).
+	FeatureGitHubWrites bool
+	FeatureMerge        bool
 }
 
 func (c *Config) YoloEnabled() bool {
@@ -352,6 +378,14 @@ func Load() (*Config, error) {
 	c.ConfigPath = path
 	c.DataDir = filepath.Join(filepath.Dir(path), "data")
 
+	c.applyWebAuthBootstrap()
+	if err := c.ValidateWebAuth(); err != nil {
+		return nil, err
+	}
+	if err := c.ValidatePreferredChannels(); err != nil {
+		return nil, err
+	}
+
 	return &c, nil
 }
 
@@ -371,6 +405,7 @@ func (c *Config) saveLocked() error {
 	out := struct {
 		DiscordToken         string            `json:"discordToken"`
 		DiscordClientID      string            `json:"discordClientId,omitempty"`
+		DiscordClientSecret  string            `json:"discordClientSecret,omitempty"`
 		AllowedUserIDs       []string          `json:"allowedUserIds"`
 		AllowedRoleIDs       []string          `json:"allowedRoleIds"`
 		Projects             ProjectsMap       `json:"projects"`
@@ -386,6 +421,10 @@ func (c *Config) saveLocked() error {
 		WorktreeIsolation    *bool             `json:"worktreeIsolation"`
 		WorktreeIdleTTLDays  *int              `json:"worktreeIdleTTLDays,omitempty"`
 		HTTPListen           string            `json:"httpListen,omitempty"`
+		WebPublicBaseURL     string            `json:"webPublicBaseURL,omitempty"`
+		DiscordGuildID       string            `json:"discordGuildId,omitempty"`
+		WebMergeMethod       string            `json:"webMergeMethod,omitempty"`
+		WebAuth              *WebAuthConfig    `json:"webAuth,omitempty"`
 		RiskyPathGlobs       []string          `json:"riskyPathGlobs,omitempty"`
 		AutoFixCI            *bool             `json:"autoFixCI,omitempty"`
 		AutoFixCIMax         int               `json:"autoFixCIMax,omitempty"`
@@ -394,6 +433,7 @@ func (c *Config) saveLocked() error {
 	}{
 		DiscordToken:         c.DiscordToken,
 		DiscordClientID:      c.DiscordClientID,
+		DiscordClientSecret:  c.DiscordClientSecret,
 		AllowedUserIDs:       slices.Clone(c.AllowedUserIDs),
 		AllowedRoleIDs:       slices.Clone(c.AllowedRoleIDs),
 		Projects:             cloneProjectsMap(c.Projects),
@@ -409,6 +449,10 @@ func (c *Config) saveLocked() error {
 		WorktreeIsolation:    c.WorktreeIsolation,
 		WorktreeIdleTTLDays:  cloneIntPtr(c.WorktreeIdleTTLDays),
 		HTTPListen:           c.HTTPListen,
+		WebPublicBaseURL:     c.WebPublicBaseURL,
+		DiscordGuildID:       c.DiscordGuildID,
+		WebMergeMethod:       c.WebMergeMethod,
+		WebAuth:              cloneWebAuth(c.WebAuth),
 		RiskyPathGlobs:       slices.Clone(c.RiskyPathGlobs),
 		AutoFixCI:            c.AutoFixCI,
 		AutoFixCIMax:         c.AutoFixCIMax,
@@ -704,9 +748,10 @@ func (c *Config) Snapshot() Snapshot {
 	for _, n := range names {
 		pc := c.Projects[n]
 		item := ProjectItem{
-			Name:          n,
-			Path:          pc.Path,
-			LinearEnvHint: "LINEAR_API_KEY_" + ProjectEnvKeySuffix(n),
+			Name:             n,
+			Path:             pc.Path,
+			LinearEnvHint:    "LINEAR_API_KEY_" + ProjectEnvKeySuffix(n),
+			DiscordChannelID: strings.TrimSpace(pc.DiscordChannelID),
 		}
 		if pc.Linear != nil {
 			item.LinearEnabled = pc.Linear.Enabled
@@ -715,6 +760,19 @@ func (c *Config) Snapshot() Snapshot {
 		} else if linearAPIKeyFromEnv(n) != "" {
 			item.LinearAPIKeySet = true
 		}
+		if repos := pc.GitHub.NormalizedRepos(); len(repos) > 0 {
+			lines := make([]string, 0, len(repos))
+			for _, r := range repos {
+				lines = append(lines, r.Slug())
+			}
+			item.GitHubReposText = strings.Join(lines, "\n")
+		}
+		for ch, proj := range c.Channels {
+			if proj == n {
+				item.ChannelOptions = append(item.ChannelOptions, ch)
+			}
+		}
+		slices.Sort(item.ChannelOptions)
 		projects = append(projects, item)
 	}
 
@@ -778,6 +836,14 @@ func (c *Config) Snapshot() Snapshot {
 		BoardStaleDays:      boardStale,
 		BoardDigestChannel:  strings.TrimSpace(c.BoardDigestChannel),
 		InvitePermissions:   BotInvitePermissions,
+		WebAuthEnabled:      c.WebAuth != nil && c.WebAuth.Enabled,
+		DiscordGuildID:      strings.TrimSpace(c.DiscordGuildID),
+		WebMergeMethod:      c.webMergeMethodLocked(),
+	}
+	// Features need WebAuthEnabled without re-locking — compute inline.
+	if c.WebAuth != nil && c.WebAuth.Enabled {
+		snap.FeatureGitHubWrites = c.WebAuth.Features.GitHubWrites
+		snap.FeatureMerge = c.WebAuth.Features.Merge
 	}
 	// ClientID/InviteURL may read DiscordClientID/DiscordToken; unlock first.
 	// Snapshot already holds RLock — resolve invite without re-locking via local fields.

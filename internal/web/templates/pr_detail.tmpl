@@ -1,0 +1,77 @@
+{{define "content"}}
+<h1 id="page-pr-detail">{{.ActiveOwner}}/{{.ActiveRepo}}#{{.PRNumber}}</h1>
+<p class="sub">
+  <a href="{{route "ship"}}">← Ship board</a>
+  · <a href="/prs/{{.ActiveOwner}}/{{.ActiveRepo}}/{{.PRNumber}}/diff{{if .Project}}?project={{urlquery .Project}}{{end}}">Diff</a>
+  {{if .PR.URL}} · <a href="{{.PR.URL}}" target="_blank" rel="noopener">GitHub</a>{{end}}
+</p>
+{{if .Flash}}<div class="flash">{{.Flash}}</div>{{end}}
+{{if .Error}}<div class="flash err">{{.Error}}</div>{{end}}
+
+<div class="section card">
+  <h2>{{.PR.Title}}</h2>
+  <p class="sub" style="margin:0">
+    <span class="badge">{{.PR.State}}</span>
+    {{if .PR.IsDraft}} · draft{{end}}
+    · review <span class="mono">{{.PR.ReviewDecision}}</span>
+    · checks <span class="mono">{{.PR.Checks}}</span>
+    · mergeable <span class="mono">{{.PR.Mergeable}}</span>
+  </p>
+  <p class="sub">
+    <span class="mono">{{.PR.Author}}</span>
+    · {{.PR.HeadRef}} → {{.PR.BaseRef}}
+    · +{{.PR.Additions}}/−{{.PR.Deletions}} · {{.PR.ChangedFiles}} files
+  </p>
+  <pre class="bubble-body" style="margin-top:1rem;white-space:pre-wrap;">{{.PR.Body}}</pre>
+</div>
+
+{{if .CanGitHubWrite}}
+<div class="section card" id="pr-comment-form">
+  <h2>Add comment</h2>
+  <form method="post" action="/prs/{{.ActiveOwner}}/{{.ActiveRepo}}/{{.PRNumber}}/comments">
+    {{template "csrf" $}}
+    <input type="hidden" name="project" value="{{.Project}}">
+    <label for="pr-body">Comment</label>
+    <textarea id="pr-body" name="body" rows="4" required placeholder="Write a comment…"></textarea>
+    <div class="form-actions"><button type="submit">Post comment</button></div>
+  </form>
+</div>
+<div class="section card" id="pr-close-form">
+  <h2>Close PR</h2>
+  <form method="post" action="/prs/{{.ActiveOwner}}/{{.ActiveRepo}}/{{.PRNumber}}/close" onsubmit="return confirm('Close this pull request?');">
+    {{template "csrf" $}}
+    <input type="hidden" name="project" value="{{.Project}}">
+    <label for="close-confirm">Type <span class="mono">close</span> to confirm</label>
+    <input id="close-confirm" type="text" name="confirm" required autocomplete="off" placeholder="close">
+    <div class="form-actions"><button type="submit" class="btn-danger">Close pull request</button></div>
+  </form>
+</div>
+{{end}}
+
+{{if .CanMerge}}
+<div class="section card" id="pr-merge-form">
+  <h2>Merge PR (admin)</h2>
+  <p class="sub" style="margin-top:0">Uses host <span class="mono">gh pr merge</span> with branch protection. Never passes <span class="mono">--admin</span>.</p>
+  <form method="post" action="/prs/{{.ActiveOwner}}/{{.ActiveRepo}}/{{.PRNumber}}/merge" onsubmit="return confirm('Merge this pull request?');">
+    {{template "csrf" $}}
+    <input type="hidden" name="project" value="{{.Project}}">
+    <div class="inline" style="grid-template-columns: 1fr 1fr; margin-bottom:0.65rem;">
+      <div>
+        <label for="merge-method">Method</label>
+        <select id="merge-method" name="method">
+          <option value="squash" {{if eq .WebMergeMethod "squash"}}selected{{end}}>Squash</option>
+          <option value="merge" {{if eq .WebMergeMethod "merge"}}selected{{end}}>Merge commit</option>
+          <option value="rebase" {{if eq .WebMergeMethod "rebase"}}selected{{end}}>Rebase</option>
+        </select>
+      </div>
+      <div>
+        <label for="merge-confirm">Type <span class="mono">merge</span> to confirm</label>
+        <input id="merge-confirm" type="text" name="confirm" required autocomplete="off" placeholder="merge">
+      </div>
+    </div>
+    <label class="check"><input type="checkbox" name="attemptAnyway" value="1"> Attempt merge even if checks look failing (still no protection bypass)</label>
+    <div class="form-actions"><button type="submit">Merge pull request</button></div>
+  </form>
+</div>
+{{end}}
+{{end}}

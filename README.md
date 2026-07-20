@@ -51,8 +51,14 @@ cp config.example.json config.json
 | `boardStaleDays` | Days without session activity before `/board` lists a thread as **stale** (default `3`). Editable on the Config page |
 | `boardDigestChannel` | Optional Discord channel ID for a nightly team board post (empty = disabled). Editable on the Config page |
 | `httpListen` | Private-network web UI bind address (default `:8787`; override with `GROK_DISCORD_HTTP_LISTEN`) |
+| `webPublicBaseURL` | Absolute origin for OAuth redirect URIs (e.g. `http://100.x.y.z:8787`). Required when `webAuth.enabled` |
+| `discordClientSecret` | Discord OAuth2 client secret for web login (or env `DISCORD_CLIENT_SECRET` / `GROK_WORK_DISCORD_CLIENT_SECRET`) |
+| `webAuth` | Optional Discord OAuth for the web UI (see below). Default / omitted = open LAN mode (legacy) |
+| `discordGuildId` | Optional Discord server id for future web deep links |
+| `projects.*.github.repos` | Optional multi-repo catalog (`owner`/`repo`) for Issues UI; omit to discover from git remotes |
+| `projects.*.discordChannelId` | Preferred Discord channel for web-started threads; must be mapped to this project in `channels` |
 
-`config.json` is gitignored. Never commit tokens, user IDs, or private project paths.
+`config.json` is gitignored. Never commit tokens, user IDs, client secrets, or private project paths.
 
 ### Web UI (private network / Tailscale)
 
@@ -65,8 +71,47 @@ While the process runs it also serves a small server-rendered admin UI (hime + `
 | `/history` | Thread list; open a thread to read each user/Grok turn |
 | `/worktrees` | List per-thread git worktrees; prune one or all past idle TTL |
 | `/config` | Add/remove projects, channel→project map, allowed users/roles, worktree idle TTL, team board digest, CI auto-fix, completion risk globs |
+| `/login` | Discord OAuth login (only when `webAuth.enabled`) |
+| `/issues` | Project picker for GitHub issues |
+| `/projects/{project}/issues` | Issue list with multi-repo picker |
+| `/projects/{project}/linear` | Linear issues (when Linear enabled) |
+| `/prs/{owner}/{repo}/{n}` | PR detail (ship board links here) |
+| `/prs/.../diff` · `/sessions/{id}/diff` | Unified diff browser |
 
-Bind for Tailscale or LAN with `"httpListen": "0.0.0.0:8787"` (or a Tailscale IP). There is **no auth** on this UI — only expose it on a private network or VPN.
+**GitHub writes (optional):** set `webAuth.enabled` and `webAuth.features.githubWrites` / `merge`. Members can comment/close; admins can merge (default `webMergeMethod`: `squash`). Merge never passes `--admin`.
+
+Bind for Tailscale or LAN with `"httpListen": "0.0.0.0:8787"` (or a Tailscale IP).
+
+#### Web auth (optional Discord OAuth)
+
+By default the UI stays **open on the private network** (no login) so existing configs keep working. To require Discord login:
+
+1. Developer Portal → your app → **OAuth2** → add redirect  
+   `http://{host}:8787/auth/discord/callback` (use your real `webPublicBaseURL`).
+2. Copy the **Client Secret** into `discordClientSecret` (or `DISCORD_CLIENT_SECRET`).
+3. Set config (or env):
+
+```json
+"webPublicBaseURL": "http://100.x.y.z:8787",
+"webAuth": {
+  "enabled": true,
+  "adminDiscordIds": ["YOUR_DISCORD_USER_ID"],
+  "memberDiscordIds": [],
+  "viewerDiscordIds": [],
+  "features": { "githubWrites": false, "merge": false, "startSessions": false }
+}
+```
+
+| Field / env | Purpose |
+|-------------|---------|
+| `webAuth.enabled` | Turn on OAuth gates |
+| `webAuth.sessionSecret` | Optional (unused for opaque server sessions; reserved) |
+| `webAuth.adminDiscordIds` | Discord user IDs who may change config / prune worktrees |
+| `webAuth.memberDiscordIds` / `viewerDiscordIds` | Optional explicit lists |
+| Bot `allowedUserIds` | Allowlisted users get **member** if not in the lists above |
+| `GROK_WORK_BOOTSTRAP_ADMIN_DISCORD_ID` | If `adminDiscordIds` is empty, merged on boot as the first admin |
+
+When enabled: unauthenticated page GETs redirect to `/login`; config and worktree **POST**s require an **admin** session + CSRF. Static assets stay public. Discord `@Grok` is unchanged (still uses the bot allowlist).
 
 ## 3. Run
 

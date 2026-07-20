@@ -166,6 +166,71 @@ query IssueByIdentifier($team: String!, $number: Float!) {
 	}, nil
 }
 
+// ListTeamIssues returns recent issues for a team key (e.g. ENG).
+func (c *Client) ListTeamIssues(ctx context.Context, teamKey string, limit int) ([]Issue, error) {
+	teamKey = strings.ToUpper(strings.TrimSpace(teamKey))
+	if teamKey == "" {
+		return nil, fmt.Errorf("linear: empty team key")
+	}
+	if limit <= 0 {
+		limit = 30
+	}
+	if limit > 50 {
+		limit = 50
+	}
+	const q = `
+query TeamIssues($team: String!, $first: Int!) {
+  issues(
+    filter: { team: { key: { eq: $team } } }
+    first: $first
+    orderBy: updatedAt
+  ) {
+    nodes {
+      id
+      identifier
+      title
+      url
+      description
+      state { name }
+      team { key }
+    }
+  }
+}`
+	var data struct {
+		Issues struct {
+			Nodes []struct {
+				ID          string `json:"id"`
+				Identifier  string `json:"identifier"`
+				Title       string `json:"title"`
+				URL         string `json:"url"`
+				Description string `json:"description"`
+				State       struct {
+					Name string `json:"name"`
+				} `json:"state"`
+				Team struct {
+					Key string `json:"key"`
+				} `json:"team"`
+			} `json:"nodes"`
+		} `json:"issues"`
+	}
+	if err := c.do(ctx, q, map[string]any{"team": teamKey, "first": limit}, &data); err != nil {
+		return nil, err
+	}
+	out := make([]Issue, 0, len(data.Issues.Nodes))
+	for _, n := range data.Issues.Nodes {
+		out = append(out, Issue{
+			ID:          n.ID,
+			Identifier:  n.Identifier,
+			Title:       n.Title,
+			URL:         n.URL,
+			State:       n.State.Name,
+			TeamKey:     n.Team.Key,
+			Description: n.Description,
+		})
+	}
+	return out, nil
+}
+
 func splitIdentifier(id string) (team string, number int, ok bool) {
 	id = strings.TrimSpace(id)
 	parts := strings.SplitN(id, "-", 2)
