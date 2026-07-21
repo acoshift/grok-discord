@@ -1033,11 +1033,23 @@
     .card.danger-zone > h2 { color: var(--danger); }
 
     /* ── In-page anchor nav (Config) ─────────────────────────────────── */
+    .config-page-header {
+      position: sticky;
+      top: 0;
+      z-index: 30;
+      margin: -0.35rem 0 1.25rem;
+      padding: 0.35rem 0 0.85rem;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      box-shadow: 0 0.65rem 0.85rem -0.65rem hsl(var(--black) / 10%);
+    }
+    .config-page-header h1 { margin-bottom: 0.2rem; }
+    .config-page-header .sub { margin-bottom: 0.75rem; }
     .anchor-nav {
       display: flex;
       flex-wrap: wrap;
       gap: 0.4rem;
-      margin: -0.5rem 0 1.5rem;
+      margin: 0;
     }
     .anchor-nav a {
       padding: 0.24rem 0.7rem;
@@ -1047,11 +1059,26 @@
       color: var(--muted);
       font-size: 0.8rem;
       font-weight: 500;
+      text-decoration: none;
+      transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
     }
     .anchor-nav a:hover {
       color: var(--text);
       border-color: var(--hover-border);
       text-decoration: none;
+    }
+    .anchor-nav a.active {
+      color: var(--text);
+      background: var(--surface-l2);
+      border-color: var(--hover-border);
+      box-shadow: var(--shadow-1);
+      font-weight: 600;
+    }
+    /* Sticky header covers ~title+sub+pills; keep in-page jumps readable. */
+    .config-page .section[id],
+    .config-page .card[id],
+    .config-page [id="access"] {
+      scroll-margin-top: 9.5rem;
     }
 
     /* ── Toolbar (compact filters above tables) ──────────────────────── */
@@ -1555,6 +1582,90 @@
     if (!{{json .SSEPath}}) {
       setStatus("offline", "err");
     }
+
+    // Config page: sticky section menu scroll-spy. Highlights the nav pill for
+    // the section currently under the sticky header as the user scrolls.
+    // Re-inits after boosted navigations into #live-root.
+    (function configScrollSpy() {
+      var onScroll = null;
+      var onClick = null;
+      var navEl = null;
+
+      function teardown() {
+        if (onScroll) {
+          window.removeEventListener("scroll", onScroll);
+          onScroll = null;
+        }
+        if (navEl && onClick) {
+          navEl.removeEventListener("click", onClick);
+        }
+        navEl = null;
+        onClick = null;
+      }
+
+      function setup() {
+        teardown();
+        var header = document.querySelector(".config-page-header");
+        if (!header) return;
+        var nav = header.querySelector(".anchor-nav");
+        if (!nav) return;
+        var links = Array.prototype.slice.call(nav.querySelectorAll('a[href^="#"]'));
+        if (!links.length) return;
+        var sections = [];
+        links.forEach(function (a) {
+          var id = (a.getAttribute("href") || "").slice(1);
+          var el = id ? document.getElementById(id) : null;
+          if (el) sections.push({ id: id, el: el });
+        });
+        if (!sections.length) return;
+
+        function setActive(id) {
+          links.forEach(function (a) {
+            a.classList.toggle("active", a.getAttribute("href") === "#" + id);
+          });
+        }
+
+        var ticking = false;
+        onScroll = function () {
+          if (ticking) return;
+          ticking = true;
+          requestAnimationFrame(function () {
+            ticking = false;
+            if (!document.contains(header)) return;
+            var offset = header.getBoundingClientRect().bottom + 12;
+            var current = sections[0].id;
+            for (var i = 0; i < sections.length; i++) {
+              if (sections[i].el.getBoundingClientRect().top <= offset) {
+                current = sections[i].id;
+              }
+            }
+            // Near page bottom the last sections never cross the sticky edge.
+            var doc = document.documentElement;
+            if (window.innerHeight + window.scrollY >= doc.scrollHeight - 4) {
+              current = sections[sections.length - 1].id;
+            }
+            setActive(current);
+          });
+        };
+        onClick = function (e) {
+          var a = e.target && e.target.closest ? e.target.closest('a[href^="#"]') : null;
+          if (!a || !nav.contains(a)) return;
+          var id = (a.getAttribute("href") || "").slice(1);
+          if (id) setActive(id);
+        };
+        navEl = nav;
+        window.addEventListener("scroll", onScroll, { passive: true });
+        nav.addEventListener("click", onClick);
+        onScroll();
+      }
+
+      document.body.addEventListener("htmx:afterSettle", function (e) {
+        var elt = e.detail && e.detail.elt;
+        if (elt && elt.id === "live-root") setup();
+      });
+      document.body.addEventListener("htmx:historyRestore", setup);
+      setup();
+    })();
   })();
   </script>
 </body>

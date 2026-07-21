@@ -1,19 +1,21 @@
 {{define "content"}}
-<h1 id="page-config">Config</h1>
-<p class="sub">Manage projects, channel map, and allowlists. Changes persist to the config file and apply immediately.</p>
-
-<div class="anchor-nav">
-  <a href="#bot-invite">Bot invite</a>
-  <a href="#grok-run-limits">Run limits</a>
-  <a href="#worktree-cleanup">Worktrees</a>
-  <a href="#resume-active-runs">Resume</a>
-  <a href="#team-board">Board</a>
-  <a href="#ci-triage">CI triage</a>
-  <a href="#risky-paths">Risk paths</a>
-  <a href="#projects">Projects</a>
-  <a href="#default-guild">Default guild</a>
-  <a href="#channels">Channels</a>
-  <a href="#access">Access</a>
+<div class="config-page" id="page-config">
+<div class="config-page-header">
+  <h1>Config</h1>
+  <p class="sub">Manage projects, channel map, and allowlists. Changes persist to the config file and apply immediately.</p>
+  <nav class="anchor-nav" aria-label="Config sections">
+    <a href="#bot-invite">Bot invite</a>
+    <a href="#grok-run-limits">Run limits</a>
+    <a href="#worktree-cleanup">Worktrees</a>
+    <a href="#resume-active-runs">Resume</a>
+    <a href="#team-board">Board</a>
+    <a href="#ci-triage">CI triage</a>
+    <a href="#risky-paths">Risk paths</a>
+    <a href="#projects">Projects</a>
+    <a href="#default-guild">Default guild</a>
+    <a href="#channels">Channels</a>
+    <a href="#access">Access</a>
+  </nav>
 </div>
 
 {{if .Flash}}
@@ -253,6 +255,7 @@
      hx-swap="innerHTML"
      hx-sync="this:replace">
   {{template "config_lists" .}}
+</div>
 </div>
 {{end}}
 
