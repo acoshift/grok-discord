@@ -285,9 +285,14 @@ func EnsureWith(ctx context.Context, repo, dataDir, project, unitID string, opts
 		return t, nil
 	}
 
+	// Drop an unusable on-disk tree, or a stale git registration whose folder
+	// was deleted outside the bot (blocks "worktree add" / "already checked out").
 	if _, err := os.Stat(path); err == nil {
 		log.Printf("gitworktree: removing unusable path %s", path)
-		_ = Remove(ctx, repo, path, branch)
+		_ = Remove(ctx, repo, path, "")
+	} else {
+		_ = pruneStaleWorktrees(ctx, repo)
+		_ = removeRegisteredWorktreesForBranch(ctx, repo, branch)
 	}
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -297,6 +302,9 @@ func EnsureWith(ctx context.Context, repo, dataDir, project, unitID string, opts
 	err := runGit(ctx, repo, "worktree", "add", "-b", branch, path, "HEAD")
 	if err != nil {
 		if branchExists(ctx, repo, branch) {
+			// Branch may still look "checked out" via a stale registration.
+			_ = pruneStaleWorktrees(ctx, repo)
+			_ = removeRegisteredWorktreesForBranch(ctx, repo, branch)
 			err = runGit(ctx, repo, "worktree", "add", path, branch)
 		}
 		if err != nil {
@@ -312,15 +320,19 @@ func Remove(ctx context.Context, repo, path, branch string) error {
 	var errs []string
 
 	if path != "" {
-		if _, err := os.Stat(path); err == nil {
-			if err := runGit(ctx, repo, "worktree", "remove", "--force", path); err != nil {
-				_ = runGit(ctx, repo, "worktree", "prune")
-				if rmErr := os.RemoveAll(path); rmErr != nil {
-					errs = append(errs, fmt.Sprintf("remove path: %v (git: %v)", rmErr, err))
-				} else {
-					_ = runGit(ctx, repo, "worktree", "prune")
-				}
-			}
+		if err := removeWorktreeAtPath(ctx, repo, path); err != nil {
+			errs = append(errs, err.Error())
+		}
+	}
+
+	// Folder deleted outside git still leaves an admin entry under
+	// .git/worktrees/; branch -D then fails with "used by worktree at …".
+	// Prune those, and force-remove any remaining registration for this branch.
+	if repo != "" {
+		_ = pruneStaleWorktrees(ctx, repo)
+		if branch != "" && IsManagedBranch(branch) {
+			_ = removeRegisteredWorktreesForBranch(ctx, repo, branch)
+			_ = pruneStaleWorktrees(ctx, repo)
 		}
 	}
 
@@ -329,7 +341,12 @@ func Remove(ctx context.Context, repo, path, branch string) error {
 			errs = append(errs, fmt.Sprintf("refuse to delete unprotected branch %q (want prefix %s or %s)", branch, DiscordBranchPrefix, WebBranchPrefix))
 		} else if branchExists(ctx, repo, branch) {
 			if err := runGit(ctx, repo, "branch", "-D", branch); err != nil {
-				errs = append(errs, fmt.Sprintf("delete branch %s: %v", branch, err))
+				// Last chance: registration may have been mid-prune.
+				_ = pruneStaleWorktrees(ctx, repo)
+				_ = removeRegisteredWorktreesForBranch(ctx, repo, branch)
+				if err2 := runGit(ctx, repo, "branch", "-D", branch); err2 != nil {
+					errs = append(errs, fmt.Sprintf("delete branch %s: %v", branch, err2))
+				}
 			}
 		}
 	}
@@ -338,6 +355,140 @@ func Remove(ctx context.Context, repo, path, branch string) error {
 		return fmt.Errorf("%s", strings.Join(errs, "; "))
 	}
 	return nil
+}
+
+// removeWorktreeAtPath force-removes a linked worktree directory if it exists.
+func removeWorktreeAtPath(ctx context.Context, repo, path string) error {
+	if path == "" {
+		return nil
+	}
+	if _, err := os.Stat(path); err != nil {
+		return nil
+	}
+	if err := runGit(ctx, repo, "worktree", "remove", "--force", path); err != nil {
+		_ = pruneStaleWorktrees(ctx, repo)
+		if rmErr := os.RemoveAll(path); rmErr != nil {
+			return fmt.Errorf("remove path: %v (git: %v)", rmErr, err)
+		}
+		_ = pruneStaleWorktrees(ctx, repo)
+	}
+	return nil
+}
+
+// pruneStaleWorktrees drops admin entries for worktree paths that no longer exist.
+func pruneStaleWorktrees(ctx context.Context, repo string) error {
+	if repo == "" {
+		return nil
+	}
+	// --expire=now so locked/stale entries whose directory is gone are cleared
+	// immediately (default may wait for gc.worktreePruneExpire).
+	return runGit(ctx, repo, "worktree", "prune", "--expire", "now")
+}
+
+// linkedWorktree is one entry from `git worktree list --porcelain`.
+type linkedWorktree struct {
+	Path   string
+	Branch string // short name without refs/heads/, empty if detached
+}
+
+// listLinkedWorktrees returns linked (non-main) worktrees for repo.
+func listLinkedWorktrees(ctx context.Context, repo string) ([]linkedWorktree, error) {
+	out, err := gitOutput(ctx, repo, "worktree", "list", "--porcelain")
+	if err != nil {
+		return nil, err
+	}
+	var (
+		list []linkedWorktree
+		cur  linkedWorktree
+		have bool
+	)
+	flush := func() {
+		if !have || cur.Path == "" {
+			cur = linkedWorktree{}
+			have = false
+			return
+		}
+		// Main worktree path equals the repo root; skip it — never remove it.
+		list = append(list, cur)
+		cur = linkedWorktree{}
+		have = false
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if line == "" {
+			flush()
+			continue
+		}
+		key, val, _ := strings.Cut(line, " ")
+		switch key {
+		case "worktree":
+			if have {
+				flush()
+			}
+			cur.Path = val
+			have = true
+		case "branch":
+			cur.Branch = strings.TrimPrefix(val, "refs/heads/")
+		}
+	}
+	flush()
+
+	mainAbs, err := filepath.Abs(repo)
+	if err != nil {
+		return list, nil
+	}
+	if resolved, err := filepath.EvalSymlinks(mainAbs); err == nil {
+		mainAbs = resolved
+	}
+	mainAbs = filepath.Clean(mainAbs)
+
+	filtered := list[:0]
+	for _, wt := range list {
+		wtAbs, err := filepath.Abs(wt.Path)
+		if err != nil {
+			filtered = append(filtered, wt)
+			continue
+		}
+		if resolved, err := filepath.EvalSymlinks(wtAbs); err == nil {
+			wtAbs = resolved
+		}
+		if filepath.Clean(wtAbs) == mainAbs {
+			continue
+		}
+		filtered = append(filtered, wt)
+	}
+	return filtered, nil
+}
+
+// removeRegisteredWorktreesForBranch force-removes every linked worktree that
+// still has branch checked out (including paths that no longer exist on disk).
+func removeRegisteredWorktreesForBranch(ctx context.Context, repo, branch string) error {
+	if repo == "" || branch == "" {
+		return nil
+	}
+	list, err := listLinkedWorktrees(ctx, repo)
+	if err != nil {
+		return err
+	}
+	var first error
+	for _, wt := range list {
+		if wt.Branch != branch {
+			continue
+		}
+		if _, statErr := os.Stat(wt.Path); statErr == nil {
+			if err := runGit(ctx, repo, "worktree", "remove", "--force", wt.Path); err != nil {
+				_ = os.RemoveAll(wt.Path)
+				if first == nil {
+					first = err
+				}
+			}
+			continue
+		}
+		// Path gone: prune should clear it; also try remove for older git.
+		if err := runGit(ctx, repo, "worktree", "remove", "--force", wt.Path); err != nil && first == nil {
+			first = err
+		}
+	}
+	return first
 }
 
 func isUsableWorktree(ctx context.Context, repo, path string) (bool, error) {
@@ -378,10 +529,21 @@ func absGitPath(base, p string) (string, error) {
 	if p == "" {
 		return "", fmt.Errorf("empty git path")
 	}
+	var abs string
+	var err error
 	if filepath.IsAbs(p) {
-		return filepath.Clean(p), nil
+		abs = filepath.Clean(p)
+	} else {
+		abs, err = filepath.Abs(filepath.Join(base, p))
+		if err != nil {
+			return "", err
+		}
 	}
-	return filepath.Abs(filepath.Join(base, p))
+	// Resolve /var → /private/var (macOS) so main vs worktree common-dir compare equal.
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		return resolved, nil
+	}
+	return abs, nil
 }
 
 func branchExists(ctx context.Context, repo, branch string) bool {

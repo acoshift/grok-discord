@@ -303,6 +303,93 @@ func TestNewWebUnitIDAndHelpers(t *testing.T) {
 	}
 }
 
+func TestRemoveStaleWorktreeMissingFolder(t *testing.T) {
+	// Worktree folder deleted outside git still leaves a registration that
+	// blocks `git branch -D` with "used by worktree at …".
+	repo := initTestRepo(t)
+	data := t.TempDir()
+	ctx := context.Background()
+
+	tr, err := Ensure(ctx, repo, data, "homeconnect", "1515266754392363009")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(tr.Path); err != nil {
+		t.Fatal(err)
+	}
+	// Registration still present until prune.
+	cmd := exec.Command("git", "-C", repo, "show-ref", "--verify", "--quiet", "refs/heads/"+tr.Branch)
+	if cmd.Run() != nil {
+		t.Fatal("branch should still exist after folder delete")
+	}
+
+	if err := Remove(ctx, repo, tr.Path, tr.Branch); err != nil {
+		t.Fatalf("Remove with missing folder: %v", err)
+	}
+	if cmd.Run() == nil {
+		t.Fatal("branch should be deleted after Remove")
+	}
+	// Ensure can recreate the same unit after a stale registration.
+	tr2, err := Ensure(ctx, repo, data, "homeconnect", "1515266754392363009")
+	if err != nil {
+		t.Fatalf("Ensure after stale cleanup: %v", err)
+	}
+	if !IsRepo(tr2.Path) {
+		t.Fatal("recreated worktree not a repo")
+	}
+	if err := Remove(ctx, repo, tr2.Path, tr2.Branch); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEnsureRecoversMissingWorktreeFolder(t *testing.T) {
+	repo := initTestRepo(t)
+	data := t.TempDir()
+	ctx := context.Background()
+
+	tr, err := Ensure(ctx, repo, data, "app", "stale-folder")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Leave branch + commits; only the directory is gone.
+	if err := os.WriteFile(filepath.Join(tr.Path, "work.txt"), []byte("kept\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", tr.Path}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=test",
+			"GIT_AUTHOR_EMAIL=test@example.com",
+			"GIT_COMMITTER_NAME=test",
+			"GIT_COMMITTER_EMAIL=test@example.com",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("add", "work.txt")
+	run("commit", "-m", "on branch")
+
+	if err := os.RemoveAll(tr.Path); err != nil {
+		t.Fatal(err)
+	}
+
+	tr2, err := Ensure(ctx, repo, data, "app", "stale-folder")
+	if err != nil {
+		t.Fatalf("Ensure should recover: %v", err)
+	}
+	if tr2.Branch != tr.Branch {
+		t.Fatalf("branch=%q want %q", tr2.Branch, tr.Branch)
+	}
+	// Commit on the managed branch should still be reachable after re-add.
+	cmd := exec.Command("git", "-C", tr2.Path, "show", "HEAD:work.txt")
+	out, err := cmd.CombinedOutput()
+	if err != nil || string(out) != "kept\n" {
+		t.Fatalf("lost branch work: err=%v out=%q", err, out)
+	}
+}
+
 func TestRemoveWebManagedBranch(t *testing.T) {
 	repo := initTestRepo(t)
 	ctx := context.Background()
