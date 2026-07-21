@@ -270,8 +270,17 @@
       flex-direction: column;
       gap: 0.15rem;
       margin-top: 1.6rem;
+      /* Keep visible so the project switcher menu is not clipped (mobile
+         horizontal scroll lives on .nav-links instead). */
+      overflow: visible;
     }
-    nav > a {
+    .nav-links {
+      display: flex;
+      flex-direction: column;
+      gap: 0.15rem;
+      min-width: 0;
+    }
+    .nav-links > a {
       display: flex;
       align-items: center;
       gap: 0.6rem;
@@ -284,7 +293,7 @@
       font-weight: 500;
       transition: background 0.12s ease, color 0.12s ease;
     }
-    nav > a[data-icon]::before {
+    .nav-links > a[data-icon]::before {
       content: "";
       flex-shrink: 0;
       width: 1.02rem;
@@ -296,27 +305,27 @@
     }
     /* Icons keyed by data-icon (not href): workspace URLs embed the project
        name, so href selectors cannot be static. */
-    nav a[data-icon="projects"] { --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='3' width='7' height='7' rx='1.5'/%3E%3Crect x='14' y='3' width='7' height='7' rx='1.5'/%3E%3Crect x='3' y='14' width='7' height='7' rx='1.5'/%3E%3Crect x='14' y='14' width='7' height='7' rx='1.5'/%3E%3C/svg%3E"); }
-    nav a[data-icon="overview"] { --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M22 12h-4l-3 9L9 3l-3 9H2'/%3E%3C/svg%3E"); }
-    nav a[data-icon="ship"] { --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M22 2 11 13'/%3E%3Cpath d='M22 2 15 22l-4-9-9-4z'/%3E%3C/svg%3E"); }
-    nav a[data-icon="issues"] { --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Ccircle cx='12' cy='12' r='3' fill='black' stroke='none'/%3E%3C/svg%3E"); }
-    nav a[data-icon="linear"] { --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 2 2 7l10 5 10-5-10-5z'/%3E%3Cpath d='M2 17l10 5 10-5'/%3E%3Cpath d='M2 12l10 5 10-5'/%3E%3C/svg%3E"); }
-    nav a[data-icon="commits"] { --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='4'/%3E%3Cline x1='1.5' y1='12' x2='8' y2='12'/%3E%3Cline x1='16' y1='12' x2='22.5' y2='12'/%3E%3C/svg%3E"); }
-    nav a[data-icon="sessions"] { --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'/%3E%3C/svg%3E"); }
-    nav a[data-icon="worktrees"] { --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cline x1='6' y1='3' x2='6' y2='15'/%3E%3Ccircle cx='18' cy='6' r='3'/%3E%3Ccircle cx='6' cy='18' r='3'/%3E%3Cpath d='M18 9a9 9 0 0 1-9 9'/%3E%3C/svg%3E"); }
-    nav a[data-icon="config"] { --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cline x1='4' y1='21' x2='4' y2='14'/%3E%3Cline x1='4' y1='10' x2='4' y2='3'/%3E%3Cline x1='12' y1='21' x2='12' y2='12'/%3E%3Cline x1='12' y1='8' x2='12' y2='3'/%3E%3Cline x1='20' y1='21' x2='20' y2='16'/%3E%3Cline x1='20' y1='12' x2='20' y2='3'/%3E%3Cline x1='1' y1='14' x2='7' y2='14'/%3E%3Cline x1='9' y1='8' x2='15' y2='8'/%3E%3Cline x1='17' y1='16' x2='23' y2='16'/%3E%3C/svg%3E"); }
-    nav > a:hover {
+    .nav-links a[data-icon="projects"] { --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='3' width='7' height='7' rx='1.5'/%3E%3Crect x='14' y='3' width='7' height='7' rx='1.5'/%3E%3Crect x='3' y='14' width='7' height='7' rx='1.5'/%3E%3Crect x='14' y='14' width='7' height='7' rx='1.5'/%3E%3C/svg%3E"); }
+    .nav-links a[data-icon="overview"] { --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M22 12h-4l-3 9L9 3l-3 9H2'/%3E%3C/svg%3E"); }
+    .nav-links a[data-icon="ship"] { --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M22 2 11 13'/%3E%3Cpath d='M22 2 15 22l-4-9-9-4z'/%3E%3C/svg%3E"); }
+    .nav-links a[data-icon="issues"] { --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Ccircle cx='12' cy='12' r='3' fill='black' stroke='none'/%3E%3C/svg%3E"); }
+    .nav-links a[data-icon="linear"] { --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 2 2 7l10 5 10-5-10-5z'/%3E%3Cpath d='M2 17l10 5 10-5'/%3E%3Cpath d='M2 12l10 5 10-5'/%3E%3C/svg%3E"); }
+    .nav-links a[data-icon="commits"] { --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='4'/%3E%3Cline x1='1.5' y1='12' x2='8' y2='12'/%3E%3Cline x1='16' y1='12' x2='22.5' y2='12'/%3E%3C/svg%3E"); }
+    .nav-links a[data-icon="sessions"] { --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'/%3E%3C/svg%3E"); }
+    .nav-links a[data-icon="worktrees"] { --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cline x1='6' y1='3' x2='6' y2='15'/%3E%3Ccircle cx='18' cy='6' r='3'/%3E%3Ccircle cx='6' cy='18' r='3'/%3E%3Cpath d='M18 9a9 9 0 0 1-9 9'/%3E%3C/svg%3E"); }
+    .nav-links a[data-icon="config"] { --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cline x1='4' y1='21' x2='4' y2='14'/%3E%3Cline x1='4' y1='10' x2='4' y2='3'/%3E%3Cline x1='12' y1='21' x2='12' y2='12'/%3E%3Cline x1='12' y1='8' x2='12' y2='3'/%3E%3Cline x1='20' y1='21' x2='20' y2='16'/%3E%3Cline x1='20' y1='12' x2='20' y2='3'/%3E%3Cline x1='1' y1='14' x2='7' y2='14'/%3E%3Cline x1='9' y1='8' x2='15' y2='8'/%3E%3Cline x1='17' y1='16' x2='23' y2='16'/%3E%3C/svg%3E"); }
+    .nav-links > a:hover {
       color: var(--text);
       background: var(--surface-l2);
       text-decoration: none;
     }
-    nav > a.active {
+    .nav-links > a.active {
       color: var(--text);
       background: var(--surface);
       border-color: var(--border);
       box-shadow: var(--shadow-1);
     }
-    nav > a.active::before { opacity: 1; }
+    .nav-links > a.active::before { opacity: 1; }
 
     /* Sidebar section caption (global shell: cross-project lead views). */
     .nav-label {
@@ -329,7 +338,8 @@
     }
 
     /* Workspace switcher: current project + dropdown of visible projects. */
-    .proj-switch { position: relative; margin: 0 0 0.6rem; }
+    .proj-switch { position: relative; margin: 0 0 0.6rem; z-index: 1; }
+    .proj-switch[open] { z-index: 60; }
     .proj-switch summary {
       list-style: none;
       display: flex;
@@ -383,7 +393,7 @@
       left: 0;
       right: 0;
       top: calc(100% + 0.3rem);
-      z-index: 40;
+      z-index: 60;
       display: flex;
       flex-direction: column;
       gap: 0.1rem;
@@ -1376,7 +1386,9 @@
       .file-rail { display: none; }
       .rv-kbd { display: none; }
       aside.side {
-        position: static;
+        /* relative + z-index so the project menu paints above main content. */
+        position: relative;
+        z-index: 40;
         height: auto;
         flex-direction: row;
         flex-wrap: wrap;
@@ -1391,17 +1403,27 @@
         order: 3;
         flex-basis: 100%;
         flex-direction: row;
+        align-items: center;
         margin-top: 0.15rem;
+        overflow: visible;
+        gap: 0.35rem;
+        padding-bottom: 0.1rem;
+      }
+      /* Scroll only the tab strip — not the project switcher (its menu would clip). */
+      .nav-links {
+        flex: 1 1 auto;
+        flex-direction: row;
         overflow-x: auto;
         scrollbar-width: none;
         gap: 0.25rem;
-        padding-bottom: 0.1rem;
+        min-width: 0;
       }
-      nav::-webkit-scrollbar { display: none; }
-      nav > a { padding: 0.38rem 0.7rem; font-size: 0.86rem; flex-shrink: 0; }
+      .nav-links::-webkit-scrollbar { display: none; }
+      .nav-links > a { padding: 0.38rem 0.7rem; font-size: 0.86rem; flex-shrink: 0; }
       .nav-label { display: none; }
-      .proj-switch { margin: 0; flex-shrink: 0; min-width: 9rem; }
+      .proj-switch { margin: 0; flex-shrink: 0; min-width: 9rem; max-width: 42%; }
       .proj-switch summary { padding: 0.32rem 0.55rem; }
+      .proj-menu { min-width: 11rem; right: auto; width: max-content; max-width: min(18rem, 85vw); }
       .side-foot {
         margin-top: 0;
         margin-left: auto;
@@ -1480,6 +1502,9 @@
             <a href="{{route "home"}}" class="proj-menu-all">All projects</a>
           </div>
         </details>
+        {{end}}
+        <div class="nav-links">
+        {{if .NavProject}}
         <a href="/projects/{{.NavProject}}" data-icon="overview" class="{{if .IsOverview}}active{{end}}">Overview</a>
         <a href="/projects/{{.NavProject}}/ship" data-icon="ship" class="{{if .IsShip}}active{{end}}">Ship</a>
         <a href="/projects/{{.NavProject}}/issues" data-icon="issues" class="{{if .IsIssues}}active{{end}}">Issues</a>
@@ -1496,6 +1521,7 @@
         <a href="{{route "worktrees"}}" data-icon="worktrees" class="{{if .IsWorktrees}}active{{end}}">Worktrees</a>
         {{if .IsAdmin}}<a href="{{route "config"}}" data-icon="config" class="{{if .IsConfig}}active{{end}}">Config</a>{{end}}
         {{end}}
+        </div>
       </nav>
       <div class="side-foot">
         <span id="sse-status" title="Live updates via SSE">connecting…</span>
@@ -1811,7 +1837,7 @@
     }
     function updateNavActive() {
       var path = location.pathname || "/";
-      document.querySelectorAll("nav > a[href]").forEach(function (a) {
+      document.querySelectorAll(".nav-links > a[href]").forEach(function (a) {
         var href = a.getAttribute("href") || "";
         a.classList.toggle("active", !!navActiveFor(path, href));
       });
