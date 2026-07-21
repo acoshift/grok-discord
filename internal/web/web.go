@@ -48,6 +48,9 @@ type Server struct {
 	// Commit review job store (lazy under data/commit-reviews).
 	reviews     *commitreview.Store
 	reviewsOnce sync.Once
+	// PR raw-patch cache (page + per-file fragments share one gh pr diff).
+	prPatchMu sync.Mutex
+	prPatches map[string]prPatchEntry
 	reviewsErr  error
 }
 
@@ -129,17 +132,6 @@ func New(cfg *config.Config, sessions *sessionstore.Store, hist *history.Store, 
 	})
 
 	app.TemplateFunc("add", func(a, b int) int { return a + b })
-	// diffClass styles unified-diff lines on the diff page (added/removed/context).
-	app.TemplateFunc("diffClass", func(line string) string {
-		switch {
-		case strings.HasPrefix(line, "+"):
-			return "add"
-		case strings.HasPrefix(line, "-"):
-			return "del"
-		default:
-			return "ctx"
-		}
-	})
 
 	// One template set per page: layout root for full documents; named {{define}}s
 	// for SSE fragments (ctx.View("dashboard#dashboard_stats", …)).
@@ -162,10 +154,10 @@ func New(cfg *config.Config, sessions *sessionstore.Store, hist *history.Store, 
 	tp.ParseFiles("linear_issues", "layout.tmpl", "linear_issues.tmpl")
 	tp.ParseFiles("linear_detail", "layout.tmpl", "linear_detail.tmpl")
 	tp.ParseFiles("pr_detail", "layout.tmpl", "pr_detail.tmpl")
-	tp.ParseFiles("diff", "layout.tmpl", "diff.tmpl")
+	tp.ParseFiles("diff", "layout.tmpl", "diff.tmpl", "diff_review.tmpl")
 	tp.ParseFiles("session", "layout.tmpl", "session.tmpl")
 	tp.ParseFiles("commits", "layout.tmpl", "commits.tmpl")
-	tp.ParseFiles("commit_detail", "layout.tmpl", "commit_detail.tmpl")
+	tp.ParseFiles("commit_detail", "layout.tmpl", "commit_detail.tmpl", "diff_review.tmpl")
 
 	static, err := fs.Sub(staticFS, "static")
 	if err != nil {
@@ -187,6 +179,7 @@ func New(cfg *config.Config, sessions *sessionstore.Store, hist *history.Store, 
 	mux.Handle("GET /history/{threadID}", s.requireAuth(hime.Handler(s.historyDetail)))
 	mux.Handle("GET /sessions", s.requireAuth(hime.Handler(s.sessionsList)))
 	mux.Handle("GET /sessions/{threadID}/diff", s.requireAuth(hime.Handler(s.sessionDiffPage)))
+	mux.Handle("GET /sessions/{threadID}/diff/file", s.requireAuth(hime.Handler(s.sessionDiffFile)))
 	mux.Handle("GET /sessions/{threadID}", s.requireAuth(hime.Handler(s.sessionPage)))
 	mux.Handle("GET /ship", s.requireAuth(hime.Handler(s.shipPage)))
 	mux.Handle("GET /worktrees", s.requireAuth(hime.Handler(s.worktreesPage)))
@@ -206,8 +199,10 @@ func New(cfg *config.Config, sessions *sessionstore.Store, hist *history.Store, 
 	mux.Handle("GET /commits", s.requireAuth(hime.Handler(s.redirectHome)))
 	mux.Handle("GET /projects/{project}/commits", s.requireAuth(hime.Handler(s.commitsList)))
 	mux.Handle("GET /projects/{project}/commits/{sha}", s.requireAuth(hime.Handler(s.commitDetail)))
+	mux.Handle("GET /projects/{project}/commits/{sha}/file", s.requireAuth(hime.Handler(s.commitDiffFile)))
 	mux.Handle("GET /prs/{owner}/{repo}/{n}", s.requireAuth(hime.Handler(s.prDetail)))
 	mux.Handle("GET /prs/{owner}/{repo}/{n}/diff", s.requireAuth(hime.Handler(s.prDiffPage)))
+	mux.Handle("GET /prs/{owner}/{repo}/{n}/diff/file", s.requireAuth(hime.Handler(s.prDiffFile)))
 	// GitHub writes (PR8–9): always registered; request-time feature + role gates.
 	mux.Handle("POST /projects/{project}/issues/{n}/comments",
 		s.requireFeature("githubWrites", s.requireMember(hime.Handler(s.postIssueComment))))
@@ -338,9 +333,11 @@ type pageData struct {
 	LinearIssue   linear.Issue
 	PR            ghpr.PRDetail
 	PRNumber      int
-	Diff          ghpr.Diff
 	DiffBase      string
 	ThreadID      string
+	// Diff review UI (commit / session / PR diff pages + per-file fragments)
+	DiffReview *diffReviewData
+	FileFrag   *fileFragData
 	// Commits UI
 	Commits         []ghpr.CommitSummary
 	Commit          ghpr.CommitDetail

@@ -101,7 +101,7 @@ func (s *Server) commitDetail(ctx *hime.Context) error {
 			return ctx.Status(http.StatusForbidden).Error(err.Error())
 		}
 	}
-	detail, showErr := ghpr.ShowCommitWith(ctx.Context(), s.ghRun(), path, sha, ghpr.DiffCaps{})
+	detail, showErr := ghpr.ShowCommitMetaWith(ctx.Context(), s.ghRun(), path, sha)
 	d := s.basePage(ctx)
 	d.Title = fmt.Sprintf("%s · %s", shortOr(detail.ShortSHA, sha), project)
 	d.IsCommits = true
@@ -110,7 +110,16 @@ func (s *Server) commitDetail(ctx *hime.Context) error {
 	d.ActiveOwner = active.Owner
 	d.ActiveRepo = active.Repo
 	d.Commit = detail
-	d.Diff = detail.Diff
+	if showErr == nil && detail.SHA != "" {
+		index, idxErr := ghpr.CommitDiffIndexWith(ctx.Context(), s.ghRun(), path, detail.SHA)
+		fragBase := fmt.Sprintf("/projects/%s/commits/%s/file", url.PathEscape(project), url.PathEscape(detail.SHA))
+		d.DiffReview = buildDiffReview(index, "c:"+detail.SHA, func(f ghpr.FileStat) string {
+			return fragBase + "?" + fragQuery(f, nil)
+		})
+		if idxErr != nil {
+			showErr = idxErr
+		}
+	}
 	d.CanReviewCommit = d.CanGitHubWrite && d.CanStartSession
 	d.Flash = strings.TrimSpace(ctx.FormValue("ok"))
 	if e := strings.TrimSpace(ctx.FormValue("err")); e != "" {
@@ -191,7 +200,7 @@ func (s *Server) postCommitReview(ctx *hime.Context) error {
 	}
 
 	// Resolve SHA / subject for job metadata.
-	detail, showErr := ghpr.ShowCommitWith(ctx.Context(), s.ghRun(), cwd, sha, ghpr.DiffCaps{MaxPatchBytes: 1, MaxFiles: 1, MaxHunks: 1})
+	detail, showErr := ghpr.ShowCommitMetaWith(ctx.Context(), s.ghRun(), cwd, sha)
 	if showErr != nil {
 		s.auditAction(ctx, audit.ActionCommitReviewStart, showErr, map[string]any{
 			"project": project, "owner": owner, "repo": repo, "sha": sha,

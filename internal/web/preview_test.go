@@ -1,11 +1,13 @@
 package web
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -143,7 +145,16 @@ func TestPreviewServer(t *testing.T) {
 		}
 	}
 
+	// Repo catalog so the commits browser and PR diff resolve without gh.
+	if err := cfg.SetProjectGitHubRepos("webapp", []config.GitHubRepoRef{{Owner: "acme", Repo: "webapp"}}); err != nil {
+		t.Fatal(err)
+	}
+
 	srv := New(cfg, store, hist, bot.New(cfg, store, hist))
+	// Synthetic git/gh so the diff review UI can be exercised with a large
+	// changeset: /projects/webapp/commits → commit detail (lazy per-file
+	// hunks), /prs/acme/webapp/128/diff for the PR surface.
+	srv.ghRunner = previewGitRunner()
 	ln, err := net.Listen("tcp", "127.0.0.1:18787")
 	if err != nil {
 		t.Fatal(err)
@@ -165,5 +176,249 @@ func TestPreviewServer(t *testing.T) {
 	}
 	if err := srv.App().Serve(ln); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// ── Synthetic large changeset for the diff review preview ──────────────────
+
+type previewFile struct {
+	path, status, old string
+	adds, dels        int
+	binary            bool
+}
+
+// previewChangeset builds a deterministic ~120-file commit: mostly small
+// modifications, a new subsystem, fixtures, a few deletes, one rename, one
+// binary, and big generated files — every diff review affordance on one page.
+func previewChangeset() []previewFile {
+	var fs []previewFile
+	seed := uint32(20260721)
+	rnd := func(n int) int {
+		seed = seed*1664525 + 1013904223
+		return int(seed>>16) % n
+	}
+	add := func(dir string, names []string, status string) {
+		for _, n := range names {
+			total := 4 + rnd(56)
+			switch r := rnd(10); {
+			case r > 8:
+				total = 250 + rnd(450)
+			case r > 6:
+				total = 60 + rnd(190)
+			}
+			f := previewFile{path: dir + "/" + n, status: status}
+			switch status {
+			case "A":
+				f.adds = total
+			case "D":
+				f.dels = total
+			default:
+				f.adds = total * (35 + rnd(50)) / 100
+				f.dels = total - f.adds
+			}
+			fs = append(fs, f)
+		}
+	}
+	add("internal/billing", []string{"ledger.go", "ledger_test.go", "jobs.go", "jobs_test.go", "invoice.go", "invoice_test.go", "refund.go", "refund_test.go", "webhook.go", "webhook_test.go", "currency.go", "tax.go", "tax_test.go", "store.go", "store_test.go", "retry.go", "retry_test.go", "metrics.go", "doc.go"}, "A")
+	add("internal/billing/ledgerstore", []string{"store.go", "store_test.go", "sqlite.go", "sqlite_test.go", "schema.go", "snapshot.go", "snapshot_test.go", "compact.go", "compact_test.go"}, "A")
+	add("internal/billing/webhookq", []string{"queue.go", "queue_test.go", "dispatch.go", "dispatch_test.go", "backoff.go"}, "A")
+	add("internal/web", []string{"invoices.go", "invoices_test.go", "webhooks.go", "webhooks_test.go", "web.go", "web_test.go", "live.go", "auth.go", "writes.go"}, "M")
+	add("internal/web/templates", []string{"billing.tmpl", "invoice_detail.tmpl", "ledger.tmpl", "refunds.tmpl", "layout.tmpl", "config.tmpl"}, "M")
+	add("internal/bot", []string{"bot.go", "bot_test.go", "completion.go", "prompt.go", "stream.go", "ci_triage.go", "brief.go"}, "M")
+	add("internal/ghpr", []string{"ghpr.go", "diff.go", "diff_test.go", "issues.go", "timeline.go", "write.go"}, "M")
+	add("internal/config", []string{"config.go", "config_test.go", "billing.go", "billing_test.go"}, "M")
+	add("cmd/grokwork", []string{"main.go"}, "M")
+	add("migrations", []string{"0041_ledger.sql", "0042_ledger_idx.sql", "0043_invoice_state.sql", "0044_webhook_queue.sql"}, "A")
+	add("docs", []string{"billing.md", "ledger.md", "runbook.md", "webhooks.md"}, "M")
+	for i := 1; i <= 24; i++ {
+		add("testdata/billing", []string{fmt.Sprintf("ledger_case_%02d.json", i)}, "A")
+	}
+	add("internal/legacy", []string{"payments_v1.go", "payments_v1_test.go"}, "D")
+	fs = append(fs,
+		previewFile{path: "internal/web/billing.go", old: "internal/web/payments.go", status: "R", adds: 208, dels: 96},
+		previewFile{path: "internal/billing/ledger.go", status: "A", adds: 934},
+		previewFile{path: "docs/assets/billing-flow.png", status: "M", binary: true},
+		previewFile{path: "package-lock.json", status: "M", adds: 1893, dels: 538},
+		previewFile{path: "internal/billing/billingpb/billing.pb.go", status: "A", adds: 1204},
+	)
+	// Dedup hand-tuned overrides (ledger.go seeded twice), then git-sort.
+	seen := map[string]int{}
+	out := fs[:0]
+	for _, f := range fs {
+		if i, ok := seen[f.path]; ok {
+			out[i] = f
+			continue
+		}
+		seen[f.path] = len(out)
+		out = append(out, f)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].path < out[j].path })
+	return out
+}
+
+var previewLinePool = []string{
+	`func (s *Store) ApplyEntry(ctx context.Context, e Entry) error {`,
+	`	if err := s.validate(e); err != nil {`,
+	`		return fmt.Errorf("apply ledger entry: %w", err)`,
+	`	}`,
+	`	s.mu.Lock()`,
+	`	defer s.mu.Unlock()`,
+	`	job := queue.NewJob(e.InvoiceID, queue.KindSettle)`,
+	`	balance := s.balances[e.AccountID]`,
+	`	s.balances[e.AccountID] = balance.Add(e.Amount)`,
+	`	slog.Info("ledger entry applied", "account", e.AccountID, "seq", e.Seq)`,
+	`	return nil`,
+	`}`,
+	`	case <-ctx.Done():`,
+	`		return ctx.Err()`,
+	`	got, err := store.Balance(ctx, "acct_9")`,
+	`	if got.Cents != 1250 {`,
+	`		t.Fatalf("balance = %d, want 1250", got.Cents)`,
+}
+
+// previewFilePatch synthesizes a plausible unified diff for one file.
+func previewFilePatch(f previewFile) string {
+	if f.binary {
+		return fmt.Sprintf("diff --git a/%s b/%s\nBinary files a/%s and b/%s differ\n", f.path, f.path, f.path, f.path)
+	}
+	oldP := f.path
+	if f.old != "" {
+		oldP = f.old
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "diff --git a/%s b/%s\n", oldP, f.path)
+	switch f.status {
+	case "A":
+		b.WriteString("new file mode 100644\n--- /dev/null\n")
+	case "D":
+		fmt.Fprintf(&b, "deleted file mode 100644\n--- a/%s\n", oldP)
+	default:
+		if f.old != "" {
+			fmt.Fprintf(&b, "similarity index 71%%\nrename from %s\nrename to %s\n", f.old, f.path)
+		}
+		fmt.Fprintf(&b, "--- a/%s\n", oldP)
+	}
+	if f.status == "D" {
+		b.WriteString("+++ /dev/null\n")
+	} else {
+		fmt.Fprintf(&b, "+++ b/%s\n", f.path)
+	}
+	seed := uint32(len(f.path)) * 2654435761
+	rnd := func(n int) int {
+		seed = seed*1664525 + 1013904223
+		return int(seed>>16) % n
+	}
+	line := func() string { return previewLinePool[rnd(len(previewLinePool))] }
+	adds, dels := f.adds, f.dels
+	hunks := max(1, min(9, (adds+dels)/40))
+	oldLn, newLn := 1+rnd(60), 0
+	newLn = oldLn
+	for h := 0; h < hunks; h++ {
+		hA, hD := adds/(hunks-h), dels/(hunks-h)
+		adds -= hA
+		dels -= hD
+		ctxN := 3
+		if f.status == "A" || f.status == "D" {
+			ctxN = 0
+		}
+		fmt.Fprintf(&b, "@@ -%d,%d +%d,%d @@ func ApplyEntry\n", oldLn, hD+ctxN*2, newLn, hA+ctxN*2)
+		for i := 0; i < ctxN; i++ {
+			b.WriteString(" " + line() + "\n")
+			oldLn++
+			newLn++
+		}
+		for a, d := hA, hD; a > 0 || d > 0; {
+			burst := 1 + rnd(6)
+			for i := 0; i < min(burst, d); i++ {
+				b.WriteString("-" + line() + "\n")
+				oldLn++
+			}
+			d -= min(burst, d)
+			for i := 0; i < min(burst, a); i++ {
+				b.WriteString("+" + line() + "\n")
+				newLn++
+			}
+			a -= min(burst, a)
+			if rnd(10) < 4 && (a > 0 || d > 0) {
+				b.WriteString(" " + line() + "\n")
+				oldLn++
+				newLn++
+			}
+		}
+		for i := 0; i < ctxN; i++ {
+			b.WriteString(" " + line() + "\n")
+			oldLn++
+			newLn++
+		}
+		oldLn += 8 + rnd(60)
+		newLn = oldLn + hA - hD
+	}
+	return b.String()
+}
+
+// previewGitRunner fakes git/gh for the commits browser and diff review UI.
+func previewGitRunner() func(ctx context.Context, dir, name string, args ...string) ([]byte, error) {
+	files := previewChangeset()
+	const sha = "4f2c9ae0b17d43c2e8a95f61b2d4c8e9a1f03b57"
+	const meta = sha + "\x1fRework billing pipeline into async ledger jobs\x1fGrok\x1fgrok@grokwork.local\x1f2026-07-21T09:14:00Z\x1f" +
+		"Ledger entries now settle through idempotent queue jobs instead of inline webhook handlers.\n"
+	return func(_ context.Context, _ string, name string, args ...string) ([]byte, error) {
+		joined := strings.Join(args, " ")
+		switch {
+		case name == "git" && strings.HasPrefix(joined, "log"):
+			rows := []string{
+				sha + "\x1fRework billing pipeline into async ledger jobs\x1fGrok\x1fgrok@grokwork.local\x1f2026-07-21T09:14:00Z",
+				"b7d21c3aa90f14e2d6c88b5f0a3e97d1c2f4a6b8\x1fweb: invoice detail drawer\x1fmint\x1fmint@acme.dev\x1f2026-07-20T17:41:00Z",
+				"9e04f7d2c5b8a1e6f3d0c9b4a7e2f5d8c1b6a3e0\x1ffix: webhook retry off-by-one\x1fpoon\x1fpoon@acme.dev\x1f2026-07-20T11:08:00Z",
+			}
+			return []byte(strings.Join(rows, "\n") + "\n"), nil
+		case name == "git" && strings.HasPrefix(joined, "rev-parse"):
+			return []byte(sha + "\n"), nil
+		case name == "git" && len(args) > 0 && args[0] == "show" && strings.Contains(joined, "--numstat"):
+			var b strings.Builder
+			for _, f := range files {
+				a, d := strconv.Itoa(f.adds), strconv.Itoa(f.dels)
+				if f.binary {
+					a, d = "-", "-"
+				}
+				if f.old != "" {
+					fmt.Fprintf(&b, "%s\t%s\t\x00%s\x00%s\x00", a, d, f.old, f.path)
+				} else {
+					fmt.Fprintf(&b, "%s\t%s\t%s\x00", a, d, f.path)
+				}
+			}
+			return []byte(b.String()), nil
+		case name == "git" && len(args) > 0 && args[0] == "show" && strings.Contains(joined, "--name-status"):
+			var b strings.Builder
+			for _, f := range files {
+				if f.old != "" {
+					fmt.Fprintf(&b, "R071\x00%s\x00%s\x00", f.old, f.path)
+				} else {
+					fmt.Fprintf(&b, "%s\x00%s\x00", f.status, f.path)
+				}
+			}
+			return []byte(b.String()), nil
+		case name == "git" && len(args) > 0 && args[0] == "show" && strings.Contains(joined, "-s"):
+			return []byte(meta), nil
+		case name == "git" && len(args) > 0 && args[0] == "show":
+			// Per-file patch: first pathspec after "--".
+			for i, a := range args {
+				if a == "--" && i+1 < len(args) {
+					for _, f := range files {
+						if f.path == args[i+1] || f.old == args[i+1] {
+							return []byte(previewFilePatch(f)), nil
+						}
+					}
+				}
+			}
+			return nil, nil
+		case name == "gh" && strings.HasPrefix(joined, "pr diff"):
+			var b strings.Builder
+			for _, f := range files {
+				b.WriteString(previewFilePatch(f))
+			}
+			return []byte(b.String()), nil
+		}
+		return nil, nil
 	}
 }

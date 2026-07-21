@@ -86,12 +86,20 @@ func workflowServer(t *testing.T) *Server {
 			return []byte(`[{"name":"ci","state":"SUCCESS","bucket":"pass"}]`), nil
 		case strings.HasPrefix(joined, "pr diff"):
 			return []byte("diff --git a/foo.go b/foo.go\n--- a/foo.go\n+++ b/foo.go\n@@ -1 +1 @@\n-old\n+new\n"), nil
+		case name == "git" && len(args) > 0 && args[0] == "diff" && strings.Contains(joined, "--numstat"):
+			return []byte("1\t1\twt.go\x00"), nil
+		case name == "git" && len(args) > 0 && args[0] == "diff" && strings.Contains(joined, "--name-status"):
+			return []byte("M\x00wt.go\x00"), nil
 		case name == "git" && len(args) > 0 && args[0] == "diff":
 			return []byte("diff --git a/wt.go b/wt.go\n--- a/wt.go\n+++ b/wt.go\n@@ -1 +1 @@\n-a\n+b\n"), nil
 		case name == "git" && len(args) > 0 && args[0] == "log":
 			return []byte("abcdef0123456789\x1fFixture commit\x1fAlice\x1fa@ex.com\x1f2026-07-20T12:00:00Z\n"), nil
 		case name == "git" && len(args) > 0 && args[0] == "rev-parse":
 			return []byte("abcdef0123456789abcdef0123456789abcdef01\n"), nil
+		case name == "git" && len(args) > 0 && args[0] == "show" && strings.Contains(joined, "--numstat"):
+			return []byte("1\t1\tfoo.go\x00"), nil
+		case name == "git" && len(args) > 0 && args[0] == "show" && strings.Contains(joined, "--name-status"):
+			return []byte("M\x00foo.go\x00"), nil
 		case name == "git" && len(args) > 0 && args[0] == "show":
 			// Metadata (-s), stat, or patch.
 			for _, a := range args {
@@ -247,6 +255,14 @@ func TestLinearListAndDetail(t *testing.T) {
 
 func TestPRDetailAndDiff(t *testing.T) {
 	srv := workflowServer(t)
+	var prDiffCalls int
+	orig := srv.ghRunner
+	srv.ghRunner = func(ctx context.Context, dir, name string, args ...string) ([]byte, error) {
+		if name == "gh" && len(args) >= 2 && args[0] == "pr" && args[1] == "diff" {
+			prDiffCalls++
+		}
+		return orig(ctx, dir, name, args...)
+	}
 	h := srv.Handler()
 	req := httptest.NewRequest(http.MethodGet, "/prs/acme/app/9?project=proj", nil)
 	w := httptest.NewRecorder()
@@ -268,14 +284,52 @@ func TestPRDetailAndDiff(t *testing.T) {
 		t.Fatalf("diff status=%d", w.Code)
 	}
 	body = w.Body.String()
-	for _, want := range []string{`id="page-diff"`, "foo.go", "@@", "old", "new", "1 file(s), 1 hunk(s)"} {
+	// Index-only page: files listed as lazy cards, hunks live in fragments.
+	for _, want := range []string{
+		`id="page-diff"`,
+		`id="diff-review"`,
+		`data-review-key="pr:acme/app#9"`,
+		`data-path="foo.go"`,
+		`hx-get="/prs/acme/app/9/diff/file?path=foo.go&amp;project=proj"`,
+		`hx-trigger="intersect once"`,
+		"1 files changed",
+	} {
 		if !strings.Contains(body, want) {
-			t.Fatalf("diff missing %q", want)
+			t.Fatalf("diff missing %q in %s", want, body)
 		}
 	}
-	// '+' is HTML-escaped in text/template as &#43;
-	if !strings.Contains(body, "&#43;new") && !strings.Contains(body, "+new") {
-		t.Fatal("diff missing added line")
+	if strings.Contains(body, "@@") {
+		t.Fatal("diff page must not inline hunks (fragments only)")
+	}
+
+	// Per-file fragment carries the hunks with line numbers.
+	req = httptest.NewRequest(http.MethodGet, "/prs/acme/app/9/diff/file?path=foo.go&project=proj", nil)
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("frag status=%d body=%s", w.Code, w.Body.String())
+	}
+	body = w.Body.String()
+	for _, want := range []string{`class="dpatch"`, "@@ -1 &#43;1 @@", `class="dl del"`, `class="dl add"`, "-old", "&#43;new"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("frag missing %q in %s", want, body)
+		}
+	}
+	if strings.Contains(body, "<nav") || strings.Contains(body, "id=\"live-root\"") {
+		t.Fatal("fragment must not contain layout chrome")
+	}
+
+	// Path traversal is rejected.
+	req = httptest.NewRequest(http.MethodGet, "/prs/acme/app/9/diff/file?path=../secrets&project=proj", nil)
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("traversal status=%d want 400", w.Code)
+	}
+
+	// Page + fragment share one cached gh pr diff fetch.
+	if prDiffCalls != 1 {
+		t.Fatalf("gh pr diff calls = %d, want 1 (patch cache)", prDiffCalls)
 	}
 }
 
@@ -314,11 +368,26 @@ func TestSessionDiff(t *testing.T) {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
 	body := w.Body.String()
-	if !strings.Contains(body, "wt.go") || !strings.Contains(body, "@@") {
+	if !strings.Contains(body, "wt.go") || !strings.Contains(body, `id="diff-review"`) {
 		t.Fatalf("body=%s", body)
+	}
+	if !strings.Contains(body, `hx-get="/sessions/thread-99/diff/file?base=origin%2Fmain&amp;path=wt.go"`) {
+		t.Fatalf("missing per-file fragment URL in %s", body)
 	}
 	if sawDir != projPath {
 		t.Fatalf("diff cwd=%q want project path %q (not process cwd)", sawDir, projPath)
+	}
+
+	// Fragment endpoint renders the hunks for one file.
+	req = httptest.NewRequest(http.MethodGet, "/sessions/thread-99/diff/file?base=origin%2Fmain&path=wt.go", nil)
+	w = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("frag status=%d body=%s", w.Code, w.Body.String())
+	}
+	body = w.Body.String()
+	if !strings.Contains(body, `class="dpatch"`) || !strings.Contains(body, "&#43;b") {
+		t.Fatalf("frag body=%s", body)
 	}
 }
 
@@ -357,6 +426,13 @@ func TestSessionDiffDiscoversWorktreeWhenSessionMetadataEmpty(t *testing.T) {
 	srv.ghRunner = func(ctx context.Context, dir, name string, args ...string) ([]byte, error) {
 		if name == "git" && len(args) > 0 && args[0] == "diff" {
 			sawDir = dir
+			joined := strings.Join(args, " ")
+			if strings.Contains(joined, "--numstat") {
+				return []byte("1\t1\tproj-only.go\x00"), nil
+			}
+			if strings.Contains(joined, "--name-status") {
+				return []byte("M\x00proj-only.go\x00"), nil
+			}
 			return []byte("diff --git a/proj-only.go b/proj-only.go\n--- a/proj-only.go\n+++ b/proj-only.go\n@@ -1 +1 @@\n-a\n+b\n"), nil
 		}
 		return orig(ctx, dir, name, args...)
@@ -486,6 +562,8 @@ func TestCommitsListAndDetail(t *testing.T) {
 		"Fixture commit",
 		"body note",
 		"foo.go",
+		`id="diff-review"`,
+		`hx-get="/projects/proj/commits/abcdef0123456789abcdef0123456789abcdef01/file?path=foo.go"`,
 		"function scopeFromLocation",
 	} {
 		if !strings.Contains(body, want) {
@@ -493,6 +571,21 @@ func TestCommitsListAndDetail(t *testing.T) {
 		}
 	}
 	assertNavActive(t, body, "Commits")
+
+	// Per-file fragment for the commit.
+	req = httptest.NewRequest(http.MethodGet, "/projects/proj/commits/abcdef0/file?path=foo.go", nil)
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("frag status=%d body=%s", w.Code, w.Body.String())
+	}
+	body = w.Body.String()
+	if !strings.Contains(body, `class="dpatch"`) || !strings.Contains(body, "&#43;new") {
+		t.Fatalf("frag body=%s", body)
+	}
+	if !strings.Contains(body, `<span class="ln">1</span>`) {
+		t.Fatalf("frag missing line numbers: %s", body)
+	}
 }
 
 // Feature-first hubs are retired: /commits and /issues redirect to the

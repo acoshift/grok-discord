@@ -21,8 +21,11 @@
   {{if .Commit.Body}}
   <pre class="bubble-body" style="margin-top:0.75rem;white-space:pre-wrap;">{{.Commit.Body}}</pre>
   {{end}}
-  {{if .Commit.Stat}}
-  <pre class="bubble-body mono" style="margin-top:0.75rem;font-size:0.8rem;">{{.Commit.Stat}}</pre>
+  {{with .DiffReview}}
+  <p class="sub" style="margin:0.75rem 0 0;">{{len .Files}} files changed
+    {{if .TotalAdds}} <span class="rv-tadd">+{{.TotalAdds}}</span>{{end}}
+    {{if .TotalDels}} <span class="rv-tdel">−{{.TotalDels}}</span>{{end}}
+  </p>
   {{end}}
 </div>
 
@@ -88,22 +91,8 @@
   {{end}}
 </div>
 
-{{if .Diff.Files}}
 <div class="section" style="margin-top:1rem;">
-  <h2 style="font-size:1rem;">Patch {{if .Diff.Truncated}}<span class="badge status-warn">truncated</span>{{end}}</h2>
-  {{range .Diff.Files}}
-  <div class="section card diff-file" style="margin-bottom:1rem;">
-    <h3 class="mono" style="font-size:0.92rem;margin-top:0;">{{if .PathNew}}{{.PathNew}}{{else}}{{.PathOld}}{{end}}</h3>
-    {{range .Hunks}}
-    <pre class="bubble-body" style="margin-top:0.5rem;font-size:0.8rem;"><code><span class="dl hunk">{{.Header}}</span>{{range .Lines}}<span class="dl {{diffClass .}}">{{.}}</span>{{end}}</code></pre>
-    {{else}}
-    <p class="muted">No hunks.</p>
-    {{end}}
-  </div>
-  {{end}}
+  {{template "diff_review" .}}
 </div>
-{{else if not .Error}}
-<div class="empty" style="margin-top:1rem;">No patch content.</div>
-{{end}}
 {{end}}
 {{end}}

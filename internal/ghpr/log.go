@@ -109,11 +109,41 @@ func ShowCommit(ctx context.Context, cwd, sha string, caps DiffCaps) (CommitDeta
 	return ShowCommitWith(ctx, defaultRunner, cwd, sha, caps)
 }
 
+// ShowCommitMetaWith loads commit metadata only (no stat, no patch) — for
+// pages that list files and fetch hunks per file.
+func ShowCommitMetaWith(ctx context.Context, run Runner, cwd, sha string) (CommitDetail, error) {
+	if run == nil {
+		run = defaultRunner
+	}
+	return showCommitMeta(ctx, run, cwd, sha)
+}
+
 // ShowCommitWith is ShowCommit with an injectable runner.
 func ShowCommitWith(ctx context.Context, run Runner, cwd, sha string, caps DiffCaps) (CommitDetail, error) {
 	if run == nil {
 		run = defaultRunner
 	}
+	detail, err := showCommitMeta(ctx, run, cwd, sha)
+	if err != nil {
+		return CommitDetail{}, err
+	}
+	fullSHA := detail.SHA
+
+	statRaw, err := run(ctx, cwd, "git", "show", "--format=", "--stat", "--no-ext-diff", fullSHA)
+	if err != nil {
+		return CommitDetail{}, err
+	}
+	detail.Stat = strings.TrimSpace(string(statRaw))
+
+	patchRaw, err := run(ctx, cwd, "git", "show", "--format=", "-p", "--no-ext-diff", fullSHA)
+	if err != nil {
+		return CommitDetail{}, err
+	}
+	detail.Diff = ParseUnifiedDiff(patchRaw, caps)
+	return detail, nil
+}
+
+func showCommitMeta(ctx context.Context, run Runner, cwd, sha string) (CommitDetail, error) {
 	sha = strings.TrimSpace(sha)
 	if sha == "" {
 		return CommitDetail{}, fmt.Errorf("empty commit sha")
@@ -154,18 +184,6 @@ func ShowCommitWith(ctx context.Context, run Runner, cwd, sha string, caps DiffC
 	if len(parts) >= 6 {
 		detail.Body = strings.TrimSpace(parts[5])
 	}
-
-	statRaw, err := run(ctx, cwd, "git", "show", "--format=", "--stat", "--no-ext-diff", fullSHA)
-	if err != nil {
-		return CommitDetail{}, err
-	}
-	detail.Stat = strings.TrimSpace(string(statRaw))
-
-	patchRaw, err := run(ctx, cwd, "git", "show", "--format=", "-p", "--no-ext-diff", fullSHA)
-	if err != nil {
-		return CommitDetail{}, err
-	}
-	detail.Diff = ParseUnifiedDiff(patchRaw, caps)
 	return detail, nil
 }
 

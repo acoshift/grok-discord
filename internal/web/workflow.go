@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -298,7 +299,11 @@ func (s *Server) prDiffPage(ctx *hime.Context) error {
 	}
 	owner, repo = ref.Owner, ref.Repo
 	selector := fmt.Sprintf("https://github.com/%s/%s/pull/%d", owner, repo, n)
-	diff, diffErr := ghpr.PRDiffWith(ctx.Context(), s.ghRun(), cwd, selector, ghpr.DiffOpts{})
+	var index ghpr.DiffIndex
+	raw, diffErr := s.prPatch(ctx.Context(), cwd, selector)
+	if diffErr == nil {
+		index = ghpr.StatPatch(raw, ghpr.DefaultMaxIndexFiles)
+	}
 	d := s.basePage(ctx)
 	d.Title = fmt.Sprintf("Diff · %s/%s#%d", owner, repo, n)
 	d.IsShip = true
@@ -306,7 +311,14 @@ func (s *Server) prDiffPage(ctx *hime.Context) error {
 	d.ActiveOwner = owner
 	d.ActiveRepo = repo
 	d.PRNumber = n
-	d.Diff = diff
+	extra := url.Values{}
+	if project != "" {
+		extra.Set("project", project)
+	}
+	fragBase := fmt.Sprintf("/prs/%s/%s/%d/diff/file", url.PathEscape(owner), url.PathEscape(repo), n)
+	d.DiffReview = buildDiffReview(index, fmt.Sprintf("pr:%s/%s#%d", owner, repo, n), func(f ghpr.FileStat) string {
+		return fragBase + "?" + fragQuery(f, extra)
+	})
 	if diffErr != nil {
 		d.Error = diffErr.Error()
 	}
@@ -323,36 +335,45 @@ func (s *Server) sessionDiffPage(ctx *hime.Context) error {
 		return ctx.Status(http.StatusNotFound).Error("unknown session/thread")
 	}
 	cwd, project := s.resolveSessionDiffCwd(ent, threadID)
-	base := strings.TrimSpace(ctx.FormValue("base"))
-	if base == "" {
-		base = "HEAD"
-		// Prefer branch-vs-main when we have a worktree or main checkout path.
-		mainCwd := strings.TrimSpace(ent.MainCwd)
-		if mainCwd == "" && project != "" {
-			mainCwd, _ = s.cfg.ProjectPath(project)
-		}
-		if mainCwd != "" || (cwd != "" && cwd != mainCwd) {
-			base = "origin/main"
-		}
-	}
-	var diff ghpr.Diff
+	base := s.sessionDiffBase(ent, cwd, project, ctx.FormValue("base"))
+	var index ghpr.DiffIndex
 	var diffErr error
 	if cwd == "" {
 		diffErr = fmt.Errorf("no git worktree found for this session (project=%q)", project)
 	} else {
-		diff, diffErr = ghpr.WorktreeDiffWith(ctx.Context(), s.ghRun(), cwd, base, ghpr.DiffCaps{})
+		index, diffErr = ghpr.WorktreeDiffIndexWith(ctx.Context(), s.ghRun(), cwd, base)
 	}
 	d := s.basePage(ctx)
 	d.Title = "Worktree diff · " + threadID
 	d.IsSessions = true
 	d.Project = project
 	d.ThreadID = threadID
-	d.Diff = diff
 	d.DiffBase = base
+	extra := url.Values{"base": {base}}
+	fragBase := "/sessions/" + url.PathEscape(threadID) + "/diff/file"
+	d.DiffReview = buildDiffReview(index, "s:"+threadID+":"+base, func(f ghpr.FileStat) string {
+		return fragBase + "?" + fragQuery(f, extra)
+	})
 	if diffErr != nil {
 		d.Error = diffErr.Error()
 	}
 	return s.viewPage(ctx, "diff", d)
+}
+
+// sessionDiffBase resolves the diff base ref: explicit request wins, else
+// branch-vs-main when a worktree or main checkout exists, else HEAD.
+func (s *Server) sessionDiffBase(ent sessionstore.Entry, cwd, project, requested string) string {
+	if b := strings.TrimSpace(requested); b != "" {
+		return b
+	}
+	mainCwd := strings.TrimSpace(ent.MainCwd)
+	if mainCwd == "" && project != "" {
+		mainCwd, _ = s.cfg.ProjectPath(project)
+	}
+	if mainCwd != "" || (cwd != "" && cwd != mainCwd) {
+		return "origin/main"
+	}
+	return "HEAD"
 }
 
 // resolveSessionDiffCwd picks a real project/worktree root for the session diff

@@ -1,0 +1,105 @@
+{{/*
+  Shared diff review UI for large changesets (commit detail, session diff, PR
+  diff). The page ships only this file index; hunks arrive per file via
+  hx-get fragments — "intersect once" for normal files, click-to-load for
+  large/generated/deleted files. Viewed-tracking, filter, and keyboard review
+  are wired by the diff-review script in layout.tmpl (keyed off #diff-review).
+*/}}
+{{define "diff_review"}}
+{{$r := .DiffReview}}
+{{if $r}}
+{{if $r.Files}}
+<div id="diff-review" data-review-key="{{$r.ReviewKey}}">
+  {{if $r.Truncated}}
+  <div class="flash err">File list truncated at {{len $r.Files}} files — review the rest locally.</div>
+  {{end}}
+  <div class="review-bar">
+    <div class="rv-progress">
+      <div class="rv-pnum"><b data-rv-done>0</b> / {{len $r.Files}} files reviewed</div>
+      <div class="rv-meter"><i data-rv-meter></i></div>
+    </div>
+    <input class="rv-filter" type="search" placeholder="Filter files… (press /)" autocomplete="off" data-rv-filter>
+    <button type="button" class="btn-secondary" data-rv-expand>Expand all</button>
+    <button type="button" class="btn-secondary" data-rv-collapse>Collapse all</button>
+    <span class="rv-kbd"><kbd>j</kbd><kbd>k</kbd> file <kbd>v</kbd> viewed <kbd>o</kbd> fold</span>
+  </div>
+  <div class="review-cols">
+    <aside class="file-rail" aria-label="Changed files">
+      {{range $r.Groups}}
+      <div class="rgroup">
+        <h3>{{if .Dir}}{{.Dir}}{{else}}(root){{end}}</h3>
+        {{range .Files}}
+        <a class="rrow" data-rv-row="{{.Idx}}" href="#df-{{.Idx}}">
+          <span class="rst st-{{.Status}}">{{.Status}}</span>
+          <span class="rpath">{{.Base}}</span>
+          <span class="rnum">{{if .Adds}}<span class="a">+{{.Adds}}</span>{{end}}{{if .Dels}} <span class="d">−{{.Dels}}</span>{{end}}</span>
+          <span class="rtick">✓</span>
+        </a>
+        {{end}}
+      </div>
+      {{end}}
+    </aside>
+    <div class="file-cards">
+      {{range $r.Files}}
+      <section class="fcard{{if .Collapsed}} folded{{end}}" id="df-{{.Idx}}" data-rv-card="{{.Idx}}" data-path="{{.Path}}"{{if .Generated}} data-gen="1"{{end}}>
+        <header class="fhead">
+          <button type="button" class="ffold" data-rv-fold aria-label="Toggle diff">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4.5 6.25L8 9.75L11.5 6.25" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <span class="fstatus st-{{.Status}}">{{.Status}}</span>
+          <a class="fpath" href="#df-{{.Idx}}">{{if .OldPath}}<span class="fdir">{{.OldPath}}</span><span class="farrow">→</span>{{end}}{{if .DirName}}<span class="fdir">{{.DirName}}/</span>{{end}}<b>{{.Base}}</b></a>
+          {{if .Generated}}<span class="fbadge">generated</span>{{end}}
+          {{if .Binary}}<span class="fbadge">binary</span>{{end}}
+          <span class="fstat">{{if .Adds}}<span class="a">+{{.Adds}}</span>{{end}}{{if .Dels}}<span class="d">−{{.Dels}}</span>{{end}}</span>
+          <label class="viewed-w"><input type="checkbox" data-rv-viewed> Viewed</label>
+        </header>
+        <div class="fbody">
+          {{if .Binary}}
+          <div class="fload"><span>Binary file — no text diff.</span></div>
+          {{else if .AutoLoad}}
+          <div class="fload"
+               hx-get="{{.FragURL}}"
+               hx-trigger="intersect once"
+               hx-target="closest .fbody"
+               hx-select="unset"
+               hx-swap="innerHTML"><span class="skl"></span><span>Loads when visible…</span></div>
+          {{else}}
+          <div class="fload">
+            <span>{{.LoadNote}}</span>
+            <button type="button" class="btn-secondary" data-rv-load
+                    hx-get="{{.FragURL}}"
+                    hx-target="closest .fbody"
+                    hx-select="unset"
+                    hx-swap="innerHTML">Load diff</button>
+          </div>
+          {{end}}
+        </div>
+      </section>
+      {{end}}
+    </div>
+  </div>
+</div>
+{{else}}
+<div class="empty">No changed files.</div>
+{{end}}
+{{end}}
+{{end}}
+
+{{define "diff_file_frag"}}
+{{$f := .FileFrag}}
+{{if $f.Err}}
+<div class="fload"><span class="muted">{{$f.Err}}</span></div>
+{{else if not $f.Hunks}}
+<div class="fload"><span class="muted">No text diff for this file.</span></div>
+{{else}}
+{{if $f.Truncated}}<div class="fload"><span class="badge status-warn">truncated</span><span class="muted">Diff too large — showing the first part.</span></div>{{end}}
+<div class="dpatch">
+{{- range $f.Hunks}}
+<div class="dl hunk"><span class="ln"></span><span class="ln"></span><span class="dc">{{.Header}}</span></div>
+{{- range .Lines}}
+<div class="dl {{.Kind}}"><span class="ln">{{if .Old}}{{.Old}}{{end}}</span><span class="ln">{{if .New}}{{.New}}{{end}}</span><span class="dc">{{.Text}}</span></div>
+{{- end}}
+{{- end}}
+</div>
+{{end}}
+{{end}}
