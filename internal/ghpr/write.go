@@ -58,6 +58,7 @@ func CreateIssueWith(ctx context.Context, run Runner, repoDir, owner, repo strin
 		return 0, "", err
 	}
 	defer cleanup()
+	// gh issue create does not support --json; it prints the new issue URL on success.
 	args := []string{"issue", "create", "--title", title, "--body-file", path}
 	if o, r := strings.TrimSpace(owner), strings.TrimSpace(repo); o != "" && r != "" {
 		args = append(args, "--repo", o+"/"+r)
@@ -69,8 +70,6 @@ func CreateIssueWith(ctx context.Context, run Runner, repoDir, owner, repo strin
 		}
 		args = append(args, "--label", lab)
 	}
-	// Prefer JSON for stable parse; fall back handled by parseCreateIssueOutput.
-	args = append(args, "--json", "number,url")
 	out, err := run(ctx, repoDir, "gh", args...)
 	if err != nil {
 		// Retry without labels if labels caused failure (missing label in repo).
@@ -79,7 +78,6 @@ func CreateIssueWith(ctx context.Context, run Runner, repoDir, owner, repo strin
 			if o, r := strings.TrimSpace(owner), strings.TrimSpace(repo); o != "" && r != "" {
 				argsNoLabel = append(argsNoLabel, "--repo", o+"/"+r)
 			}
-			argsNoLabel = append(argsNoLabel, "--json", "number,url")
 			out2, err2 := run(ctx, repoDir, "gh", argsNoLabel...)
 			if err2 == nil {
 				return parseCreateIssueOutput(out2)

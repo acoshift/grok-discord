@@ -8,11 +8,16 @@ import (
 	"testing"
 )
 
-func TestCreateIssueWithJSON(t *testing.T) {
+func TestCreateIssueWithURL(t *testing.T) {
 	var saw []string
 	var bodyPath string
 	run := func(ctx context.Context, dir, name string, args ...string) ([]byte, error) {
 		saw = append([]string{name}, args...)
+		for _, a := range args {
+			if a == "--json" {
+				t.Fatal("gh issue create does not support --json")
+			}
+		}
 		for i, a := range args {
 			if a == "--body-file" && i+1 < len(args) {
 				bodyPath = args[i+1]
@@ -25,7 +30,8 @@ func TestCreateIssueWithJSON(t *testing.T) {
 				}
 			}
 		}
-		return []byte(`{"number":42,"url":"https://github.com/o/r/issues/42"}`), nil
+		// Real gh prints the issue URL (no --json on create).
+		return []byte("https://github.com/o/r/issues/42\n"), nil
 	}
 	n, url, err := CreateIssueWith(context.Background(), run, "/repo", "o", "r", CreateIssueOpts{
 		Title:  "Bug",
@@ -44,6 +50,9 @@ func TestCreateIssueWithJSON(t *testing.T) {
 	}
 	if !strings.Contains(joined, "--label commit-review") || !strings.Contains(joined, "--repo o/r") {
 		t.Fatalf("%v", saw)
+	}
+	if strings.Contains(joined, "--json") {
+		t.Fatalf("must not pass --json: %v", saw)
 	}
 	if bodyPath == "" {
 		t.Fatal("no body file")
@@ -64,11 +73,16 @@ func TestCreateIssueLabelFallback(t *testing.T) {
 	calls := 0
 	run := func(ctx context.Context, dir, name string, args ...string) ([]byte, error) {
 		calls++
+		for _, a := range args {
+			if a == "--json" {
+				t.Fatal("gh issue create does not support --json")
+			}
+		}
 		joined := strings.Join(args, " ")
 		if strings.Contains(joined, "--label") {
 			return nil, fmt.Errorf("label missing")
 		}
-		return []byte(`{"number":7,"url":"https://github.com/o/r/issues/7"}`), nil
+		return []byte("https://github.com/o/r/issues/7\n"), nil
 	}
 	n, _, err := CreateIssueWith(context.Background(), run, "/repo", "o", "r", CreateIssueOpts{
 		Title:  "T",
@@ -80,6 +94,14 @@ func TestCreateIssueLabelFallback(t *testing.T) {
 	}
 	if n != 7 || calls != 2 {
 		t.Fatalf("n=%d calls=%d", n, calls)
+	}
+}
+
+func TestParseCreateIssueOutputJSON(t *testing.T) {
+	// Defensive: still accept JSON if a wrapper or future gh ever emits it.
+	n, url, err := parseCreateIssueOutput([]byte(`{"number":3,"url":"https://github.com/o/r/issues/3"}`))
+	if err != nil || n != 3 || url != "https://github.com/o/r/issues/3" {
+		t.Fatalf("n=%d url=%s err=%v", n, url, err)
 	}
 }
 
