@@ -15,6 +15,8 @@ func TestRemoteWorkPromptPrefixWorktree(t *testing.T) {
 		"Do not merge",
 		"PR URL",
 		"Do not leave work as local-only commits",
+		"~/Documents",
+		"Do NOT scan or search the user's home directory",
 	} {
 		if !strings.Contains(p, want) {
 			t.Fatalf("missing %q in:\n%s", want, p)
@@ -33,6 +35,8 @@ func TestRemoteWorkPromptPrefixNoWorktree(t *testing.T) {
 		"feature branch",
 		"gh pr create",
 		"PR URL",
+		"~/Documents",
+		"Do NOT scan or search the user's home directory",
 	} {
 		if !strings.Contains(p, want) {
 			t.Fatalf("missing %q in:\n%s", want, p)

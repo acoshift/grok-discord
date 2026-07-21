@@ -729,6 +729,12 @@ func remoteWorkPromptPrefix(branch string) string {
 		"Do not leave work as local-only commits. Do not merge the PR.",
 		"Include the PR URL in your final reply.",
 		"",
+		"Filesystem scope (macOS privacy): stay inside this unit's cwd/worktree and the project repo.",
+		"Do NOT scan or search the user's home directory or protected folders — no find/ls/rg/glob over",
+		"~, $HOME, ~/Documents, ~/Desktop, ~/Downloads, ~/Music, ~/Pictures, ~/Library, or similar.",
+		"Do not walk the whole home tree looking for docs or configs. If something is not under the",
+		"worktree/project, ask the user for a path or URL instead of searching outside.",
+		"",
 	)
 	return strings.Join(lines, "\n")
 }
