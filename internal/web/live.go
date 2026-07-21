@@ -128,7 +128,10 @@ func (s *Server) fpConfig() string {
 // sseEvent is a domain change notification for htmx.
 type sseEvent struct {
 	Domain string `json:"domain"`
-	Rev    string `json:"rev"`
+	Rev    string `json:"rev,omitempty"`
+	// Revs is set on the initial hello event so mid-session reconnects can
+	// refresh only domains that changed while the socket was down.
+	Revs *liveRevs `json:"revs,omitempty"`
 	// StatusSnapshot is included on the initial "message" event for tests/compat.
 	*bot.StatusSnapshot
 	Tick int64 `json:"tick,omitempty"`
@@ -137,8 +140,10 @@ type sseEvent struct {
 // sse streams domain change events. Clients subscribe with hx-trigger="sse:<domain>"
 // and only fetch the partials that match.
 //
-// First event is unnamed ("message") with StatusSnapshot for connect/tests.
-// Later ticks emit only domains whose fingerprint changed.
+// First event is unnamed ("message") hello: StatusSnapshot + full liveRevs.
+// The browser keeps last-seen revs; on reconnect it compares and re-fetches
+// only changed domains (see layout.tmpl). Later ticks emit only domains whose
+// fingerprint changed since this connection's baseline.
 func (s *Server) sse(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -171,18 +176,19 @@ func (s *Server) sse(w http.ResponseWriter, r *http.Request) {
 		return true
 	}
 
-	// Immediate first event so clients and tests do not wait on the ticker.
+	// Immediate hello so clients and tests do not wait on the ticker.
+	// Include full revs for reconnect catch-up (client compares to last seen).
+	prev := s.computeLiveRevs()
 	snap := s.bot.StatusSnapshot()
 	if !writeEvent("", sseEvent{
 		Domain:         "hello",
+		Revs:           &prev,
 		StatusSnapshot: &snap,
 		Tick:           1,
 	}) {
 		return
 	}
 
-	// Baseline revs: no domain events until something actually changes.
-	prev := s.computeLiveRevs()
 	var tick int64 = 1
 
 	ticker := time.NewTicker(2 * time.Second)

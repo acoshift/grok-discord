@@ -1645,8 +1645,75 @@
       setTimeout(function () { setFormLoading(form, true); }, 0);
     });
 
-    document.body.addEventListener("htmx:sseOpen", function () {
+    // Mid-session SSE reconnect catch-up: hello carries full domain fingerprints
+    // (revs). First open stores them (page HTML is already current). Later hellos
+    // (reconnect) re-fetch only live-regions whose rev changed while offline.
+    var lastLiveRevs = null;
+    var liveDomains = ["dashboard", "ship", "history", "worktrees", "config"];
+
+    function applyLiveRevs(revs) {
+      if (!revs) return;
+      if (lastLiveRevs) {
+        var changed = {};
+        var any = false;
+        for (var i = 0; i < liveDomains.length; i++) {
+          var d = liveDomains[i];
+          if ((lastLiveRevs[d] || "") !== (revs[d] || "")) {
+            changed[d] = true;
+            any = true;
+          }
+        }
+        if (any) {
+          document.querySelectorAll(".live-region[hx-get][hx-trigger]").forEach(function (el) {
+            var trigger = el.getAttribute("hx-trigger") || "";
+            var needs = false;
+            for (var d in changed) {
+              if (Object.prototype.hasOwnProperty.call(changed, d) &&
+                  trigger.indexOf("sse:" + d) !== -1) {
+                needs = true;
+                break;
+              }
+            }
+            if (!needs) return;
+            htmx.ajax("GET", el.getAttribute("hx-get"), {
+              source: el,
+              target: el,
+              swap: el.getAttribute("hx-swap") || "innerHTML",
+              select: el.getAttribute("hx-select") || "unset"
+            });
+          });
+        }
+      }
+      lastLiveRevs = revs;
+    }
+
+    function bindLiveRevTracking(source) {
+      if (!source || source.__grokLiveRevsBound) return;
+      source.__grokLiveRevsBound = true;
+      // Unnamed hello event (domain fingerprints for reconnect sync).
+      source.addEventListener("message", function (ev) {
+        try {
+          var data = JSON.parse(ev.data);
+          if (data && data.revs) applyLiveRevs(data.revs);
+        } catch (err) { /* ignore malformed */ }
+      });
+      // Keep lastLiveRevs current as domain ticks arrive during the session.
+      liveDomains.forEach(function (name) {
+        source.addEventListener(name, function (ev) {
+          try {
+            var data = JSON.parse(ev.data);
+            if (!data || !data.rev) return;
+            if (!lastLiveRevs) lastLiveRevs = {};
+            lastLiveRevs[name] = data.rev;
+          } catch (err) { /* ignore malformed */ }
+        });
+      });
+    }
+
+    document.body.addEventListener("htmx:sseOpen", function (e) {
       setStatus("live", "ok");
+      var src = e.detail && e.detail.source;
+      bindLiveRevTracking(src);
     });
     document.body.addEventListener("htmx:sseError", function () {
       setStatus("reconnecting…", "err");

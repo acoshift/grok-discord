@@ -168,6 +168,9 @@ func TestPagesRender(t *testing.T) {
 				`scrollIntoViewOnBoost=false`,
 				`onload=`,
 				`boostScrollByPath`,
+				// Mid-session SSE reconnect catch-up (rev compare → partial refresh).
+				`lastLiveRevs`,
+				`applyLiveRevs`,
 			} {
 				if !strings.Contains(body, live) {
 					t.Fatalf("path %s missing live marker %q", tc.path, live)
@@ -1204,18 +1207,38 @@ func TestSSE(t *testing.T) {
 	if payload == "" {
 		t.Fatalf("no data event in body: %q", body)
 	}
-	var snap bot.StatusSnapshot
-	if err := json.Unmarshal([]byte(payload), &snap); err != nil {
+	var hello struct {
+		Domain string `json:"domain"`
+		Revs   *struct {
+			Dashboard string `json:"dashboard"`
+			Ship      string `json:"ship"`
+			History   string `json:"history"`
+			Worktrees string `json:"worktrees"`
+			Config    string `json:"config"`
+		} `json:"revs"`
+		bot.StatusSnapshot
+	}
+	if err := json.Unmarshal([]byte(payload), &hello); err != nil {
 		t.Fatalf("unmarshal payload %q: %v", payload, err)
 	}
-	if snap.SessionCount < 1 {
-		t.Fatalf("expected sessionCount>=1 got %+v", snap)
+	if hello.Domain != "hello" {
+		t.Fatalf("expected domain=hello got %q", hello.Domain)
 	}
-	if snap.ProjectCount < 1 {
-		t.Fatalf("expected projectCount>=1 got %+v", snap)
+	if hello.SessionCount < 1 {
+		t.Fatalf("expected sessionCount>=1 got %+v", hello.StatusSnapshot)
 	}
-	if snap.Time.IsZero() {
+	if hello.ProjectCount < 1 {
+		t.Fatalf("expected projectCount>=1 got %+v", hello.StatusSnapshot)
+	}
+	if hello.Time.IsZero() {
 		t.Fatal("time zero in SSE payload")
+	}
+	if hello.Revs == nil {
+		t.Fatal("hello missing revs for reconnect catch-up")
+	}
+	if hello.Revs.Dashboard == "" || hello.Revs.Ship == "" || hello.Revs.History == "" ||
+		hello.Revs.Worktrees == "" || hello.Revs.Config == "" {
+		t.Fatalf("hello revs incomplete: %+v", hello.Revs)
 	}
 }
 
