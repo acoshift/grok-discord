@@ -1103,13 +1103,19 @@
     }
     .config-page-header h1 { margin-bottom: 0.2rem; }
     .config-page-header .sub { margin-bottom: 0.75rem; }
+    /* Reset shell `nav` (column sidebar) — section chips are a horizontal wrap. */
     .anchor-nav {
       display: flex;
+      flex-direction: row;
       flex-wrap: wrap;
+      align-items: center;
       gap: 0.4rem;
       margin: 0;
     }
     .anchor-nav a {
+      display: inline-flex;
+      align-items: center;
+      flex: 0 0 auto;
       padding: 0.24rem 0.7rem;
       border-radius: 999px;
       border: 1px solid var(--border);
