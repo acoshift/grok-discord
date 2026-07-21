@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -559,6 +560,65 @@ func TestBulkFixEmptyRedirectList(t *testing.T) {
 	loc := w.Header().Get("Location")
 	if !strings.Contains(loc, "/projects/proj/issues") || !strings.Contains(loc, "err=") {
 		t.Fatalf("Location=%q", loc)
+	}
+}
+
+// TestBulkFixStartsManySessions exercises parallel StartFix for a full bulk batch.
+func TestBulkFixStartsManySessions(t *testing.T) {
+	srv, _, b := fixEnabledServer(t)
+	t.Cleanup(func() { bot.WaitIdleForTest(b, 5*time.Second) })
+	spy := &bot.FakeThreadAPI{NextMsg: "m1", NextTh: "many-th"}
+	bot.SetThreadAPIForTest(b, spy)
+	srv.ghRunner = func(ctx context.Context, dir, name string, args ...string) ([]byte, error) {
+		if strings.Contains(strings.Join(args, " "), "issue view") {
+			n := "0"
+			for i, a := range args {
+				if a == "view" && i+1 < len(args) {
+					n = args[i+1]
+					break
+				}
+			}
+			return []byte(`{
+				"number":` + n + `,"title":"Bug ` + n + `","body":"body","url":"https://github.com/acme/app/issues/` + n + `",
+				"state":"OPEN","author":{"login":"z"},"labels":[],"comments":[]
+			}`), nil
+		}
+		return []byte("{}"), nil
+	}
+	sid, csrf, err := srv.LoginAs("admin-1", "A", config.WebRoleAdmin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nums := url.Values{"owner": {"acme"}, "repo": {"app"}}
+	for _, n := range []string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "10"} {
+		nums.Add("numbers", n)
+	}
+	w := postFix(t, srv, "/projects/proj/issues/fix", sid, csrf, nums)
+	if w.Code != http.StatusFound && w.Code != http.StatusSeeOther {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	loc := w.Header().Get("Location")
+	if !strings.HasPrefix(loc, "/projects/proj/sessions") {
+		t.Fatalf("Location=%q", loc)
+	}
+	if spy.StartCount() != 10 {
+		t.Fatalf("create called %d times, want 10", spy.StartCount())
+	}
+	// First id is many-th; subsequent are many-th-2 … many-th-10 (FakeThreadAPI).
+	wantIDs := []string{"many-th"}
+	for i := 2; i <= 10; i++ {
+		wantIDs = append(wantIDs, fmt.Sprintf("many-th-%d", i))
+	}
+	var bound int
+	for _, id := range wantIDs {
+		e, ok := srv.sessions.Get(id)
+		if !ok || len(e.Issues) != 1 {
+			t.Fatalf("session %s ok=%v issues=%d", id, ok, len(e.Issues))
+		}
+		bound++
+	}
+	if bound != 10 {
+		t.Fatalf("bound=%d", bound)
 	}
 }
 

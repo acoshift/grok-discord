@@ -127,40 +127,59 @@ func (s *Server) postIssuesBulkFix(ctx *hime.Context) error {
 	}
 
 	actor := s.fixActor(ctx)
+	reqCtx := ctx.Context()
+	gh := s.ghRun()
+
+	// Start each issue in parallel: gh issue view + Discord thread create dominate latency.
+	type bulkOne struct {
+		n      int
+		res    bot.FixStartResult
+		err    error
+	}
+	out := make([]bulkOne, len(numbers))
+	var wg sync.WaitGroup
+	for i, n := range numbers {
+		wg.Add(1)
+		go func(i, n int) {
+			defer wg.Done()
+			info, _ := ghpr.ViewIssueWith(reqCtx, gh, path, n, owner, repo)
+			title := strings.TrimSpace(info.Title)
+			body := info.Body
+			issueURL := info.URL
+			if issueURL == "" {
+				issueURL = fmt.Sprintf("https://github.com/%s/%s/issues/%d", owner, repo, n)
+			}
+			res, startErr := s.bot.StartFix(bot.FixStartOpts{
+				Kind:     bot.FixKindGitHub,
+				Project:  project,
+				Actor:    actor,
+				ForceNew: true,
+				Owner:    owner,
+				Repo:     repo,
+				Number:   n,
+				Title:    title,
+				URL:      issueURL,
+				Body:     body,
+			})
+			out[i] = bulkOne{n: n, res: res, err: startErr}
+			detail := map[string]any{
+				"project": project, "kind": "github-bulk",
+				"owner": owner, "repo": repo, "number": n,
+				"threadId": res.ThreadID, "status": string(res.Status),
+				"queuePos": res.QueuePos, "created": res.Created,
+			}
+			s.auditAction(ctx, audit.ActionSessionStart, startErr, detail)
+		}(i, n)
+	}
+	wg.Wait()
+
 	started := 0
 	var failMsgs []string
-	for _, n := range numbers {
-		info, _ := ghpr.ViewIssueWith(ctx.Context(), s.ghRun(), path, n, owner, repo)
-		title := strings.TrimSpace(info.Title)
-		body := info.Body
-		issueURL := info.URL
-		if issueURL == "" {
-			issueURL = fmt.Sprintf("https://github.com/%s/%s/issues/%d", owner, repo, n)
-		}
-		res, startErr := s.bot.StartFix(bot.FixStartOpts{
-			Kind:     bot.FixKindGitHub,
-			Project:  project,
-			Actor:    actor,
-			ForceNew: true,
-			Owner:    owner,
-			Repo:     repo,
-			Number:   n,
-			Title:    title,
-			URL:      issueURL,
-			Body:     body,
-		})
-		detail := map[string]any{
-			"project": project, "kind": "github-bulk",
-			"owner": owner, "repo": repo, "number": n,
-			"threadId": res.ThreadID, "status": string(res.Status),
-			"queuePos": res.QueuePos, "created": res.Created,
-		}
-		if startErr != nil {
-			s.auditAction(ctx, audit.ActionSessionStart, startErr, detail)
-			failMsgs = append(failMsgs, fmt.Sprintf("#%d: %s", n, startErr.Error()))
+	for _, r := range out {
+		if r.err != nil {
+			failMsgs = append(failMsgs, fmt.Sprintf("#%d: %s", r.n, r.err.Error()))
 			continue
 		}
-		s.auditAction(ctx, audit.ActionSessionStart, nil, detail)
 		started++
 	}
 	if started > 0 {
