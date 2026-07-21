@@ -1,7 +1,7 @@
 {{define "content"}}
 <p class="sub" style="margin-bottom:0.5rem">
-  {{if .NavProject}}
-  <a href="/projects/{{.NavProject}}/sessions">← Sessions</a>
+  {{if .Project}}
+  <a href="/projects/{{.Project}}/sessions">← Sessions</a>
   {{else}}
   <a href="{{route "history"}}">← History</a>
   {{end}}

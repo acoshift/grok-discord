@@ -341,6 +341,12 @@ func (s *Server) sessionRedirect(ctx *hime.Context, threadID, ok, errMsg string)
 	if errMsg != "" {
 		q.Set("err", errMsg)
 	}
+	// Keep the workspace shell scoped after Fix/Continue redirects.
+	if q.Get("project") == "" {
+		if ent, ok := s.sessions.Get(threadID); ok && strings.TrimSpace(ent.Project) != "" {
+			q.Set("project", ent.Project)
+		}
+	}
 	loc := "/sessions/" + url.PathEscape(threadID)
 	if enc := q.Encode(); enc != "" {
 		loc += "?" + enc
@@ -424,11 +430,19 @@ func (s *Server) sessionPage(ctx *hime.Context) error {
 	if s.history != nil {
 		if th, err := s.history.Get(threadID); err == nil {
 			d.Thread = th
+			if d.Project == "" {
+				d.Project = th.Project
+			}
 		} else {
 			d.Thread.ThreadID = threadID
 		}
 	} else {
 		d.Thread.ThreadID = threadID
+	}
+	// URL workspace scope wins so ← Sessions returns to the project the user
+	// was browsing (also covers history-only threads with ?project=).
+	if d.NavProject != "" {
+		d.Project = d.NavProject
 	}
 	return s.viewPage(ctx, "session", d)
 }

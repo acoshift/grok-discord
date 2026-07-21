@@ -436,7 +436,8 @@ func TestSessionsHub(t *testing.T) {
 		t.Fatal("legacy brand in sessions hub")
 	}
 
-	// Detail still works and highlights Sessions.
+	// Detail still works and highlights Sessions. ← Sessions uses the
+	// session's project even when the URL has no ?project= (global shell).
 	req = httptest.NewRequest(http.MethodGet, "/sessions/thread-99", nil)
 	w = httptest.NewRecorder()
 	h.ServeHTTP(w, req)
@@ -448,7 +449,7 @@ func TestSessionsHub(t *testing.T) {
 		`id="page-session"`,
 		"thread-99",
 		"Grok Work",
-		`href="/sessions"`,
+		`href="/projects/proj/sessions">← Sessions</a>`,
 		"please fix the flaky test",
 	} {
 		if !strings.Contains(detail, want) {
@@ -568,8 +569,14 @@ func TestNavScopeRules(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/sessions/thread-99?project=proj", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
-	if body := w.Body.String(); !strings.Contains(body, `href="/history/thread-99?project=proj"`) {
-		t.Fatalf("session detail Turn log missing project query: %s", body)
+	body := w.Body.String()
+	for _, want := range []string{
+		`href="/history/thread-99?project=proj"`,
+		`href="/projects/proj/sessions">← Sessions</a>`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("scoped session detail missing %q: %s", want, body)
+		}
 	}
 	req = httptest.NewRequest(http.MethodGet, "/history/thread-99?project=proj", nil)
 	w = httptest.NewRecorder()
@@ -577,13 +584,21 @@ func TestNavScopeRules(t *testing.T) {
 	histBody := w.Body.String()
 	for _, want := range []string{
 		`data-scope="proj"`,
-		`href="/projects/proj/sessions"`,
+		`href="/projects/proj/sessions">← Sessions</a>`,
 		`href="/sessions/thread-99?project=proj"`,
 		`class="active">Sessions</a>`,
 	} {
 		if !strings.Contains(histBody, want) {
 			t.Fatalf("scoped turn log missing %q", want)
 		}
+	}
+	// Turn log without ?project= still backs to the thread's project sessions
+	// (History is not a primary nav tab).
+	req = httptest.NewRequest(http.MethodGet, "/history/thread-99", nil)
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if hist := w.Body.String(); !strings.Contains(hist, `href="/projects/proj/sessions">← Sessions</a>`) {
+		t.Fatalf("unscoped turn log back link missing project sessions: %s", hist)
 	}
 
 	// Unknown project workspace pages are forbidden, not silently global.
@@ -604,6 +619,47 @@ func TestNavScopeRules(t *testing.T) {
 		}
 		if loc := w.Header().Get("Location"); loc != "/" {
 			t.Fatalf("%s Location=%q want /", path, loc)
+		}
+	}
+}
+
+// TestProjectScopedBackButtons pins ← back links on detail surfaces to the
+// project the user was browsing (NavProject) or the unit's own project.
+func TestProjectScopedBackButtons(t *testing.T) {
+	srv, _, _ := testServer(t)
+	if err := srv.history.Append("hist-only", history.Turn{
+		User: "x", Prompt: "p", Response: "r", Status: "done", Project: "proj",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.sessions.Set("no-proj", sessionstore.Entry{SessionID: "s"}); err != nil {
+		t.Fatal(err)
+	}
+	h := srv.Handler()
+	cases := []struct {
+		path string
+		want string
+	}{
+		{"/sessions/thread-99", `href="/projects/proj/sessions">← Sessions</a>`},
+		{"/sessions/thread-99?project=proj", `href="/projects/proj/sessions">← Sessions</a>`},
+		{"/sessions/hist-only", `href="/projects/proj/sessions">← Sessions</a>`},
+		{"/sessions/hist-only?project=proj", `href="/projects/proj/sessions">← Sessions</a>`},
+		{"/sessions/no-proj?project=proj", `href="/projects/proj/sessions">← Sessions</a>`},
+		{"/sessions/no-proj", `href="/sessions">← Sessions</a>`},
+		{"/history/thread-99", `href="/projects/proj/sessions">← Sessions</a>`},
+		{"/history/thread-99?project=proj", `href="/projects/proj/sessions">← Sessions</a>`},
+		{"/history/hist-only", `href="/projects/proj/sessions">← Sessions</a>`},
+	}
+	for _, tc := range cases {
+		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Errorf("%s status=%d", tc.path, w.Code)
+			continue
+		}
+		if !strings.Contains(w.Body.String(), tc.want) {
+			t.Errorf("%s missing %q", tc.path, tc.want)
 		}
 	}
 }

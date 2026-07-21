@@ -394,7 +394,7 @@ func TestSessionDiff(t *testing.T) {
 	if !strings.Contains(body, "wt.go") || !strings.Contains(body, `id="diff-review"`) {
 		t.Fatalf("body=%s", body)
 	}
-	if !strings.Contains(body, `hx-get="/sessions/thread-99/diff/file?base=origin%2Fmain&amp;path=wt.go"`) {
+	if !strings.Contains(body, `hx-get="/sessions/thread-99/diff/file?base=origin%2Fmain&amp;path=wt.go&amp;project=proj"`) {
 		t.Fatalf("missing per-file fragment URL in %s", body)
 	}
 	if sawDir != wt {

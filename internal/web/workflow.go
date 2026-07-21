@@ -346,10 +346,16 @@ func (s *Server) sessionDiffPage(ctx *hime.Context) error {
 	d := s.basePage(ctx)
 	d.Title = "Worktree diff · " + threadID
 	d.IsSessions = true
+	if project == "" {
+		project = d.NavProject
+	}
 	d.Project = project
 	d.ThreadID = threadID
 	d.DiffBase = base
 	extra := url.Values{"base": {base}}
+	if project != "" {
+		extra.Set("project", project)
+	}
 	fragBase := "/sessions/" + url.PathEscape(threadID) + "/diff/file"
 	d.DiffReview = buildDiffReview(index, "s:"+threadID+":"+base, func(f ghpr.FileStat) string {
 		return fragBase + "?" + fragQuery(f, extra)
