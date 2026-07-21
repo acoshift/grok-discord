@@ -300,7 +300,8 @@ func (b *Bot) refreshBriefCard(s *discordgo.Session, threadID, cwd string) (pinn
 		return false, fmt.Errorf("empty brief card")
 	}
 
-	msgID, err := b.upsertBriefMessage(s, threadID, e.BriefMsgID, card)
+	oldBriefMsgID := e.BriefMsgID
+	msgID, err := b.upsertBriefMessage(s, threadID, oldBriefMsgID, card)
 	if err != nil {
 		return false, err
 	}
@@ -335,6 +336,13 @@ func (b *Bot) refreshBriefCard(s *discordgo.Session, threadID, cwd string) (pinn
 		// Pin needs Pin Messages (split from Manage Messages); card still works unpinned.
 		log.Printf("brief: pin thread=%s msg=%s: %v", threadID, msgID, pinErr)
 		return false, nil
+	}
+	// When the card was re-posted (edit of the old message failed), drop the
+	// previous pin so only the current brief stays pinned.
+	if oldBriefMsgID != "" && oldBriefMsgID != msgID {
+		if unpinErr := s.ChannelMessageUnpin(threadID, oldBriefMsgID); unpinErr != nil {
+			log.Printf("brief: unpin old thread=%s msg=%s: %v", threadID, oldBriefMsgID, unpinErr)
+		}
 	}
 	return true, nil
 }
