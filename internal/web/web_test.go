@@ -258,7 +258,12 @@ func TestPagesRender(t *testing.T) {
 	})
 
 	t.Run("static assets", func(t *testing.T) {
-		for _, path := range []string{"/static/htmx.min.js", "/static/sse.js"} {
+		for _, path := range []string{
+			"/static/htmx.min.js",
+			"/static/sse.js",
+			"/static/fonts/inter-latin-var.woff2",
+			"/static/fonts/ibm-plex-mono-400.woff2",
+		} {
 			req := httptest.NewRequest(http.MethodGet, path, nil)
 			w := httptest.NewRecorder()
 			h.ServeHTTP(w, req)
