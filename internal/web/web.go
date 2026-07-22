@@ -533,7 +533,7 @@ func (s *Server) shipPage(ctx *hime.Context) error {
 	d := s.basePage(ctx)
 	d.Title = "Ship board"
 	d.IsShip = true
-	d.Ship = s.bot.ListShipBoard(project, state)
+	d.Ship = s.listShipBoardVisible(ctx, project, state)
 	return s.viewPage(ctx, "ship", d)
 }
 
@@ -656,7 +656,7 @@ func (s *Server) shipPartialData(ctx *hime.Context) pageData {
 	project := strings.TrimSpace(ctx.FormValue("project"))
 	state := strings.TrimSpace(ctx.FormValue("state"))
 	d := s.basePage(ctx)
-	d.Ship = s.bot.ListShipBoard(project, state)
+	d.Ship = s.listShipBoardVisible(ctx, project, state)
 	// Workspace ship pages refresh with &scoped=1 so fragments keep the
 	// scoped layout (no Project column). The global board also passes
 	// ?project= as a data filter but must keep the column — hence the

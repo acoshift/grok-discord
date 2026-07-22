@@ -148,7 +148,7 @@ func (s *Server) home(ctx *hime.Context) error {
 	d.Title = "Projects"
 	d.IsDashboard = true
 	d.ProjectCards = s.buildProjectCards(ctx)
-	d.Status = s.bot.StatusSnapshot()
+	d.Status = s.statusVisible(ctx)
 	d.Flash = ctx.FormValue("ok")
 	d.Error = ctx.FormValue("err")
 	return s.viewPage(ctx, "home", d)
@@ -162,7 +162,7 @@ func (s *Server) partialHomeProjects(ctx *hime.Context) error {
 
 func (s *Server) partialHomeRuns(ctx *hime.Context) error {
 	d := s.basePage(ctx)
-	d.Status = s.bot.StatusSnapshot()
+	d.Status = s.statusVisible(ctx)
 	return s.viewFragment(ctx, "home", "home_runs", d)
 }
 

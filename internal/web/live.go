@@ -196,8 +196,9 @@ func (s *Server) sse(w http.ResponseWriter, r *http.Request) {
 
 	// Immediate hello so clients and tests do not wait on the ticker.
 	// Include full revs for reconnect catch-up (client compares to last seen).
+	// StatusSnapshot is ACL-filtered so members do not learn other projects' runs.
 	prev := s.computeLiveRevs()
-	snap := s.bot.StatusSnapshot()
+	snap := s.statusVisibleHTTP(r)
 	if !writeEvent("", sseEvent{
 		Domain:         "hello",
 		Revs:           &prev,

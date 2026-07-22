@@ -140,6 +140,23 @@ func TestListShipBoard(t *testing.T) {
 	if len(draft.Rows) != 1 || draft.Rows[0].Number != 3 {
 		t.Fatalf("draft: %+v", draft.Rows)
 	}
+
+	// ACL-style among filter: only alpha rows + stats, dropdown is the among list.
+	onlyAlpha := b.ListShipBoardAmong("", "all", []string{"alpha"})
+	if len(onlyAlpha.Rows) != 2 || onlyAlpha.Total != 2 {
+		t.Fatalf("among alpha: rows=%d total=%d", len(onlyAlpha.Rows), onlyAlpha.Total)
+	}
+	if len(onlyAlpha.Projects) != 1 || onlyAlpha.Projects[0] != "alpha" {
+		t.Fatalf("among projects: %v", onlyAlpha.Projects)
+	}
+	hidden := b.ListShipBoardAmong("beta", "all", []string{"alpha"})
+	if len(hidden.Rows) != 0 || hidden.Total != 0 {
+		t.Fatalf("among denied project filter: %+v", hidden)
+	}
+	empty := b.ListShipBoardAmong("", "open", []string{})
+	if len(empty.Rows) != 0 || len(empty.Projects) != 0 {
+		t.Fatalf("among empty: rows=%d projects=%v", len(empty.Rows), empty.Projects)
+	}
 }
 
 func TestChecksLookFailing(t *testing.T) {

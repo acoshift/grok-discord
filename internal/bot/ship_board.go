@@ -70,6 +70,13 @@ type ShipBoard struct {
 // are optional (empty project = all; empty state defaults to "open").
 // Stats always cover the project-filtered set; Rows honor stateFilter.
 func (b *Bot) ListShipBoard(projectFilter, stateFilter string) ShipBoard {
+	return b.ListShipBoardAmong(projectFilter, stateFilter, nil)
+}
+
+// ListShipBoardAmong is ListShipBoard restricted to project names in among.
+// among nil means unrestricted (all configured projects). Empty among yields an
+// empty board with an empty Projects dropdown (for web ACL filtering).
+func (b *Bot) ListShipBoardAmong(projectFilter, stateFilter string, among []string) ShipBoard {
 	projectFilter = strings.TrimSpace(projectFilter)
 	stateFilter = strings.ToLower(strings.TrimSpace(stateFilter))
 	if stateFilter == "" {
@@ -84,7 +91,24 @@ func (b *Bot) ListShipBoard(projectFilter, stateFilter string) ShipBoard {
 	if b == nil {
 		return board
 	}
-	if b.cfg != nil {
+
+	var allowed map[string]struct{}
+	if among != nil {
+		allowed = make(map[string]struct{}, len(among))
+		for _, n := range among {
+			n = strings.TrimSpace(n)
+			if n != "" {
+				allowed[n] = struct{}{}
+			}
+		}
+		// Preserve caller order for the filter dropdown.
+		board.Projects = append([]string(nil), among...)
+		if projectFilter != "" {
+			if _, ok := allowed[projectFilter]; !ok {
+				return board
+			}
+		}
+	} else if b.cfg != nil {
 		board.Projects = b.cfg.ProjectNames()
 	}
 	if b.sessions == nil {
@@ -101,6 +125,11 @@ func (b *Bot) ListShipBoard(projectFilter, stateFilter string) ShipBoard {
 		}
 		if projectFilter != "" && !strings.EqualFold(e.Project, projectFilter) {
 			continue
+		}
+		if allowed != nil {
+			if _, ok := allowed[e.Project]; !ok {
+				continue
+			}
 		}
 		goal := strings.TrimSpace(e.Goal)
 		if goal == "" {
