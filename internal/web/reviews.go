@@ -18,10 +18,13 @@ import (
 
 // teamReviewRow is one history line for PR detail.
 type teamReviewRow struct {
-	Review   reviewstore.Review
-	Fresh    bool
-	StickyCR bool
-	Label    string
+	Review    reviewstore.Review
+	Fresh     bool
+	StickyCR  bool
+	Label     string // machine verdict
+	LabelText string // human label for badge
+	BadgeClass string
+	HeadShort string
 }
 
 // reviewRequestRow is one My Reviews table row.
@@ -467,11 +470,82 @@ func buildTeamReviewRows(bucket reviewstore.PRBucket, currentHead string) []team
 	out := make([]teamReviewRow, 0, len(revs))
 	for _, r := range revs {
 		fresh := reviewstore.IsReviewFresh(r.HeadSHA, currentHead)
-		row := teamReviewRow{Review: r, Fresh: fresh, Label: string(r.Verdict)}
+		row := teamReviewRow{
+			Review:    r,
+			Fresh:     fresh,
+			Label:     string(r.Verdict),
+			LabelText: teamVerdictText(r.Verdict),
+			BadgeClass: teamVerdictBadge(r.Verdict),
+			HeadShort: shortSHA(r.HeadSHA),
+		}
 		if er, ok := effByID[r.ID]; ok && er.Verdict == reviewstore.VerdictChangesRequested {
 			row.StickyCR = er.Stale
 		}
 		out = append(out, row)
 	}
 	return out
+}
+
+func teamVerdictText(v reviewstore.Verdict) string {
+	switch v {
+	case reviewstore.VerdictApproved:
+		return "approved"
+	case reviewstore.VerdictChangesRequested:
+		return "changes requested"
+	case reviewstore.VerdictCommented:
+		return "comment"
+	default:
+		return string(v)
+	}
+}
+
+func teamVerdictBadge(v reviewstore.Verdict) string {
+	switch v {
+	case reviewstore.VerdictApproved:
+		return "status-done"
+	case reviewstore.VerdictChangesRequested:
+		return "status-warn"
+	default:
+		return ""
+	}
+}
+
+func shortSHA(sha string) string {
+	sha = strings.TrimSpace(sha)
+	if len(sha) > 7 {
+		return sha[:7]
+	}
+	return sha
+}
+
+func teamRollupText(label string) string {
+	switch label {
+	case reviewstore.RollupChangesRequested:
+		return "Changes requested"
+	case reviewstore.RollupApproved:
+		return "Approved"
+	case reviewstore.RollupReviewRequested:
+		return "Review requested"
+	case reviewstore.RollupStaleApprovals:
+		return "Stale approvals"
+	case reviewstore.RollupNone, "":
+		return "No reviews"
+	default:
+		return label
+	}
+}
+
+func teamRollupBadge(label string) string {
+	switch label {
+	case reviewstore.RollupChangesRequested:
+		return "status-warn"
+	case reviewstore.RollupApproved:
+		return "status-done"
+	case reviewstore.RollupReviewRequested:
+		return "live"
+	case reviewstore.RollupStaleApprovals:
+		return "status-warn"
+	default:
+		return ""
+	}
 }

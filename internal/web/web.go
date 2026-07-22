@@ -373,6 +373,8 @@ type pageData struct {
 	TeamReviews         []teamReviewRow
 	TeamPendingRequests []reviewstore.Request
 	TeamRollup          string
+	TeamRollupText      string
+	TeamRollupBadge     string
 	ReviewerOptions     []reviewerOption
 	ReviewRequests      []reviewRequestRow
 	ReviewStatusFilter  string

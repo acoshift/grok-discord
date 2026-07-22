@@ -1012,6 +1012,114 @@
       align-items: center;
       margin-top: 0.75rem;
     }
+    button.btn-compact,
+    .btn-compact {
+      height: 1.85rem;
+      min-width: 0;
+      padding: 0 0.7rem;
+      font-size: 0.78rem;
+      font-weight: 550;
+    }
+    .nowrap { white-space: nowrap; }
+
+    /* ── PR team review card ─────────────────────────────────────────── */
+    #pr-team-review .team-review-head {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem 1rem;
+      margin-bottom: 0.35rem;
+    }
+    #pr-team-review .team-review-head h2 { margin: 0; }
+    #pr-team-review .team-review-status {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.45rem 0.65rem;
+    }
+    #pr-team-review .team-review-gh {
+      font-size: 0.82rem;
+    }
+    #pr-team-review .team-review-blurb {
+      margin: 0 0 1rem;
+    }
+    #pr-team-review .team-review-empty {
+      margin: 0 0 0.25rem;
+      font-size: 0.9rem;
+    }
+    #pr-team-review .team-review-history {
+      margin-bottom: 0.25rem;
+    }
+    #pr-team-review .team-review-verdict {
+      white-space: nowrap;
+    }
+    #pr-team-review .team-review-verdict .badge {
+      margin-right: 0.25rem;
+    }
+    #pr-team-review .team-review-verdict .badge:last-child {
+      margin-right: 0;
+    }
+    #pr-team-review .team-review-note {
+      max-width: 22rem;
+      font-size: 0.9rem;
+      line-height: 1.35;
+    }
+    #pr-team-review .team-review-note .clamp {
+      -webkit-line-clamp: 2;
+    }
+    #pr-team-review .team-review-gh-link {
+      font-size: 0.8rem;
+      font-weight: 550;
+      white-space: nowrap;
+    }
+    #pr-team-review .team-review-block {
+      margin-top: 1.15rem;
+      padding-top: 1.05rem;
+      border-top: 1px solid var(--border);
+    }
+    #pr-team-review .team-review-h3 {
+      font-size: 0.82rem;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      margin: 0 0 0.7rem;
+      color: var(--text);
+    }
+    #pr-team-review .team-review-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+    #pr-team-review .team-review-fields {
+      display: grid;
+      grid-template-columns: minmax(11rem, 14rem) minmax(0, 1fr);
+      gap: 0.75rem 1rem;
+      align-items: start;
+      margin-bottom: 0.55rem;
+    }
+    #pr-team-review .team-review-fields .field label {
+      margin-bottom: 0.3rem;
+    }
+    #pr-team-review .team-review-fields textarea {
+      min-height: 5.5rem;
+      height: auto;
+      resize: vertical;
+      line-height: 1.4;
+    }
+    #pr-team-review .team-review-form .check {
+      margin: 0.15rem 0 0.15rem;
+    }
+    #pr-team-review .team-review-form .form-actions {
+      margin-top: 0.65rem;
+    }
+    @media (max-width: 720px) {
+      #pr-team-review .team-review-fields {
+        grid-template-columns: 1fr;
+      }
+      #pr-team-review .team-review-note {
+        max-width: none;
+      }
+    }
     .invite-row {
       display: grid;
       grid-template-columns: 1fr auto auto;

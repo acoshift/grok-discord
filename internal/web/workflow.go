@@ -495,6 +495,8 @@ func (s *Server) prDetail(ctx *hime.Context) error {
 		d.TeamReviews = buildTeamReviewRows(bucket, head)
 		label, _, _ := reviewstore.TeamRollup(bucket, head)
 		d.TeamRollup = label
+		d.TeamRollupText = teamRollupText(label)
+		d.TeamRollupBadge = teamRollupBadge(label)
 		for _, req := range bucket.Requests {
 			if req.Status == reviewstore.StatusPending {
 				d.TeamPendingRequests = append(d.TeamPendingRequests, req)
