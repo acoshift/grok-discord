@@ -100,6 +100,75 @@ type Entry struct {
 	ResolvedBy     string `json:"resolvedBy,omitempty"`
 	EscalatedAt    string `json:"escalatedAt,omitempty"`
 	EscalatedBy    string `json:"escalatedBy,omitempty"`
+
+	// Wave 2 IDE-free confidence.
+	Checkpoints   []CheckpointMeta `json:"checkpoints,omitempty"`
+	OpenQuestions []OpenQuestion   `json:"openQuestions,omitempty"`
+	VerifyMsgID   string           `json:"verifyMsgId,omitempty"`
+}
+
+// CheckpointMeta is bot-owned git checkpoint metadata (refs/grok-cp/<threadId>/<id>).
+type CheckpointMeta struct {
+	ID        string `json:"id"`
+	Ref       string `json:"ref"`
+	SHA       string `json:"sha"`
+	Label     string `json:"label,omitempty"`
+	CreatedAt string `json:"createdAt"`
+	CreatedBy string `json:"createdBy,omitempty"`
+}
+
+// OpenQuestion is a decision card / brief open question.
+type OpenQuestion struct {
+	ID      string `json:"id"`
+	Text    string `json:"text"`
+	Status  string `json:"status,omitempty"` // open|answered|dismissed
+	AskedAt string `json:"askedAt,omitempty"`
+	Answer  string `json:"answer,omitempty"`
+	// Options are button labels when posted as a decision card (max ~5).
+	Options []string `json:"options,omitempty"`
+}
+
+// Wave 2 size caps.
+const (
+	MaxCheckpoints   = 20
+	MaxOpenQuestions = 15
+)
+
+// ClampWave2Fields enforces checkpoint/open-question caps. Always nil error.
+func ClampWave2Fields(e *Entry) error {
+	if e == nil {
+		return nil
+	}
+	if len(e.Checkpoints) > MaxCheckpoints {
+		// Drop oldest (front).
+		e.Checkpoints = append([]CheckpointMeta(nil), e.Checkpoints[len(e.Checkpoints)-MaxCheckpoints:]...)
+	}
+	if len(e.OpenQuestions) > MaxOpenQuestions {
+		e.OpenQuestions = append([]OpenQuestion(nil), e.OpenQuestions[len(e.OpenQuestions)-MaxOpenQuestions:]...)
+	}
+	return nil
+}
+
+// FindCheckpoint returns metadata for id (case-sensitive short id).
+func (e Entry) FindCheckpoint(id string) (CheckpointMeta, bool) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return CheckpointMeta{}, false
+	}
+	for _, c := range e.Checkpoints {
+		if c.ID == id {
+			return c, true
+		}
+	}
+	return CheckpointMeta{}, false
+}
+
+// LatestCheckpoint returns the most recently appended checkpoint.
+func (e Entry) LatestCheckpoint() (CheckpointMeta, bool) {
+	if len(e.Checkpoints) == 0 {
+		return CheckpointMeta{}, false
+	}
+	return e.Checkpoints[len(e.Checkpoints)-1], true
 }
 
 // Case phase constants.

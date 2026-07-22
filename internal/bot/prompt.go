@@ -37,6 +37,14 @@ const (
 	KindCloseCase
 	KindCustomerUpdate
 	KindAnswer
+	// Wave 2 IDE-free
+	KindCheckpoint
+	KindUndo
+	KindRestore
+	KindVerify
+	KindSync
+	KindComments
+	KindAddress
 	KindTask
 )
 
@@ -99,6 +107,20 @@ func ParseMessage(content, botUserID string) Parsed {
 		return Parsed{Kind: KindEscalate, Prompt: text}
 	case "/answer", "answer":
 		return Parsed{Kind: KindAnswer, Prompt: text}
+	case "/checkpoint", "checkpoint":
+		return Parsed{Kind: KindCheckpoint, Prompt: text}
+	case "/undo", "undo":
+		return Parsed{Kind: KindUndo, Prompt: text}
+	case "/restore", "restore":
+		return Parsed{Kind: KindRestore, Prompt: text}
+	case "/verify", "verify":
+		return Parsed{Kind: KindVerify, Prompt: text}
+	case "/sync", "sync":
+		return Parsed{Kind: KindSync, Prompt: text}
+	case "/comments", "comments":
+		return Parsed{Kind: KindComments, Prompt: text}
+	case "/address", "address":
+		return Parsed{Kind: KindAddress, Prompt: text}
 	}
 
 	if isStartCommand(lower, text) {
@@ -118,6 +140,27 @@ func ParseMessage(content, botUserID string) Parsed {
 	}
 	if isAnswerCommand(lower) {
 		return Parsed{Kind: KindAnswer, Prompt: text}
+	}
+	if isCheckpointCommand(lower) {
+		return Parsed{Kind: KindCheckpoint, Prompt: text}
+	}
+	if isUndoCommand(lower) {
+		return Parsed{Kind: KindUndo, Prompt: text}
+	}
+	if isRestoreCommand(lower) {
+		return Parsed{Kind: KindRestore, Prompt: text}
+	}
+	if isVerifyCommand(lower) {
+		return Parsed{Kind: KindVerify, Prompt: text}
+	}
+	if isSyncCommand(lower) {
+		return Parsed{Kind: KindSync, Prompt: text}
+	}
+	if isCommentsCommand(lower) {
+		return Parsed{Kind: KindComments, Prompt: text}
+	}
+	if isAddressCommand(lower) {
+		return Parsed{Kind: KindAddress, Prompt: text}
 	}
 	if isDequeueCommand(lower) {
 		arg := text
@@ -214,6 +257,36 @@ func isCustomerUpdateCommand(lower string) bool {
 
 func isAnswerCommand(lower string) bool {
 	return strings.HasPrefix(lower, "/answer ") || lower == "/answer"
+}
+
+func isCheckpointCommand(lower string) bool {
+	return strings.HasPrefix(lower, "/checkpoint ") || lower == "/checkpoint"
+}
+
+func isUndoCommand(lower string) bool {
+	return strings.HasPrefix(lower, "/undo ") || lower == "/undo"
+}
+
+func isRestoreCommand(lower string) bool {
+	return strings.HasPrefix(lower, "/restore ") || lower == "/restore"
+}
+
+func isVerifyCommand(lower string) bool {
+	// Only slash form so freeform "verify the fix works" stays a task.
+	return strings.HasPrefix(lower, "/verify ") || lower == "/verify"
+}
+
+func isSyncCommand(lower string) bool {
+	return strings.HasPrefix(lower, "/sync ") || lower == "/sync"
+}
+
+func isCommentsCommand(lower string) bool {
+	return strings.HasPrefix(lower, "/comments ") || lower == "/comments"
+}
+
+func isAddressCommand(lower string) bool {
+	// Only slash form so freeform "address the nits" stays a task.
+	return strings.HasPrefix(lower, "/address ") || lower == "/address"
 }
 
 func parseStartCommand(text string) Parsed {
@@ -349,6 +422,12 @@ func HelpText() string {
 		"• `/customer-update <text>` — set sanitized customer-facing text",
 		"• `/close [answered|fixed|…]` — close case (auto-label freeze; no LabelManual)",
 		"• `/board cases` — list Mode=case sessions by phase",
+		"• `/checkpoint [label]` — bot-owned git checkpoint (local ref)",
+		"• `/undo` / `/restore <id> [force]` — hard-reset worktree to a checkpoint (local only)",
+		"• `/verify [name]` — run project verify commands (no Grok)",
+		"• `/sync` — fetch + merge origin primary into this branch",
+		"• `/comments` — list unresolved PR review comments",
+		"• `/address` — queue a run to address unresolved review comments",
 		"• `/help` — this message",
 		"",
 		"**Run action bar** — buttons on the live status / done message and `/status`:",

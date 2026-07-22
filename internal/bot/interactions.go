@@ -24,14 +24,38 @@ func (b *Bot) onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate
 
 func (b *Bot) handleComponent(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	data := i.MessageComponentData()
-	action, threadID, ok := parseActionCustomID(data.CustomID)
-	if !ok {
-		return
-	}
 
 	user := interactionUser(i)
 	if user == nil {
 		respondEphemeral(s, i, "Could not resolve your Discord user.")
+		return
+	}
+
+	// Wave 2 decision buttons (gd:d:<thread>:<qid>:<idx>)
+	if tid, qid, idx, ok := parseDecisionCustomID(data.CustomID); ok {
+		if i.ChannelID != "" && i.ChannelID != tid {
+			respondEphemeral(s, i, "This control belongs to another thread.")
+			return
+		}
+		if !isThread(s, tid) {
+			respondEphemeral(s, i, "Use these buttons inside a Grok thread.")
+			return
+		}
+		project := b.projectForThread(s, tid)
+		if project == "" || !b.isAllowedUser(s, i.GuildID, user.ID, project, i.Member) {
+			msg := "You're not allowed to use Grok on this project."
+			if project != "" {
+				msg = fmt.Sprintf("You're not allowed to use Grok on project **%s**.", project)
+			}
+			respondEphemeral(s, i, msg)
+			return
+		}
+		b.handleDecisionClick(s, i, tid, qid, idx, user)
+		return
+	}
+
+	action, threadID, ok := parseActionCustomID(data.CustomID)
+	if !ok {
 		return
 	}
 

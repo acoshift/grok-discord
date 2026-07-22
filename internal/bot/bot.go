@@ -689,6 +689,20 @@ func (b *Bot) onMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 		b.handleCustomerUpdate(s, m, parsed)
 	case KindAnswer:
 		b.handleAnswer(s, m, parsed)
+	case KindCheckpoint:
+		b.handleCheckpoint(s, m, parsed)
+	case KindUndo:
+		b.handleUndo(s, m, parsed)
+	case KindRestore:
+		b.handleRestore(s, m, parsed)
+	case KindVerify:
+		b.handleVerify(s, m, parsed)
+	case KindSync:
+		b.handleSync(s, m, parsed)
+	case KindComments:
+		b.handleComments(s, m, parsed)
+	case KindAddress:
+		b.handleAddress(s, m, parsed)
 	case KindStartInvestigate, KindStartFix, KindStartExplain, KindTask:
 		log.Printf("task: starting async for msg=%s kind=%d", m.ID, parsed.Kind)
 		// Immediate typing indicator while we open the thread / claim the queue.
@@ -1769,6 +1783,12 @@ func (b *Bot) executeTask(ctx context.Context, item taskItem, job *runJob) {
 				})
 			}
 		}
+		// Wave 2 decision cards from DECISION: blocks
+		if present {
+			if specs := parseDecisionBlocks(replyText); len(specs) > 0 {
+				b.postDecisionCards(s, threadID, specs)
+			}
+		}
 		// Case shipping: first open PR → phase shipping
 		if pol.Mode == ModeCase && pol.AllowPR {
 			if e, ok := b.sessions.Get(threadID); ok && e.CasePhase() == sessionstore.PhaseFixing {
@@ -2305,6 +2325,20 @@ func kindName(k Kind) string {
 		return "link"
 	case KindReview:
 		return "review"
+	case KindCheckpoint:
+		return "checkpoint"
+	case KindUndo:
+		return "undo"
+	case KindRestore:
+		return "restore"
+	case KindVerify:
+		return "verify"
+	case KindSync:
+		return "sync"
+	case KindComments:
+		return "comments"
+	case KindAddress:
+		return "address"
 	case KindTask:
 		return "task"
 	default:

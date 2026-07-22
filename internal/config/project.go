@@ -42,8 +42,17 @@ type ProjectConfig struct {
 	CapabilityByRole        map[string]string        `json:"capabilityByRole,omitempty"` // Discord role ID → template
 	CapabilityByUser        map[string]string        `json:"capabilityByUser,omitempty"` // Discord user ID → template
 	InvestigateTools        string                   `json:"investigateTools,omitempty"` // comma tools allowlist
-	GitHub                  *ProjectGitHubConfig     `json:"github,omitempty"`
-	Linear                  *ProjectLinearConfig     `json:"linear,omitempty"`
+	// VerifyCommands are project shell checks run by @Grok /verify (no Grok).
+	VerifyCommands []VerifyCommand `json:"verifyCommands,omitempty"`
+	GitHub         *ProjectGitHubConfig `json:"github,omitempty"`
+	Linear         *ProjectLinearConfig `json:"linear,omitempty"`
+}
+
+// VerifyCommand is one named verify harness entry.
+type VerifyCommand struct {
+	Name      string `json:"name"`
+	Command   string `json:"command"`
+	TimeoutMs int    `json:"timeoutMs,omitempty"` // default 600000
 }
 
 // ProjectsMap is project name → config. JSON accepts either a path string or a full object.
@@ -130,6 +139,7 @@ func (m ProjectsMap) MarshalJSON() ([]byte, error) {
 		CapabilityByRole         map[string]string       `json:"capabilityByRole,omitempty"`
 		CapabilityByUser         map[string]string       `json:"capabilityByUser,omitempty"`
 		InvestigateTools         string                  `json:"investigateTools,omitempty"`
+		VerifyCommands           []VerifyCommand         `json:"verifyCommands,omitempty"`
 		GitHub                   *ProjectGitHubConfig    `json:"github,omitempty"`
 		Linear                   *ProjectLinearConfig    `json:"linear,omitempty"`
 	}
@@ -150,11 +160,19 @@ func (m ProjectsMap) MarshalJSON() ([]byte, error) {
 			CapabilityByRole:         cloneStringMap(pc.CapabilityByRole),
 			CapabilityByUser:         cloneStringMap(pc.CapabilityByUser),
 			InvestigateTools:         pc.InvestigateTools,
+			VerifyCommands:           cloneVerifyCommands(pc.VerifyCommands),
 			GitHub:                   cloneProjectGitHub(pc.GitHub),
 			Linear:                   cloneProjectLinear(pc.Linear),
 		}
 	}
 	return json.Marshal(out)
+}
+
+func cloneVerifyCommands(in []VerifyCommand) []VerifyCommand {
+	if len(in) == 0 {
+		return nil
+	}
+	return slices.Clone(in)
 }
 
 func cloneProjectLinear(l *ProjectLinearConfig) *ProjectLinearConfig {
@@ -186,11 +204,61 @@ func cloneProjectsMap(m ProjectsMap) ProjectsMap {
 			CapabilityByRole:         cloneStringMap(v.CapabilityByRole),
 			CapabilityByUser:         cloneStringMap(v.CapabilityByUser),
 			InvestigateTools:         v.InvestigateTools,
+			VerifyCommands:           cloneVerifyCommands(v.VerifyCommands),
 			GitHub:                   cloneProjectGitHub(v.GitHub),
 			Linear:                   cloneProjectLinear(v.Linear),
 		}
 	}
 	return out
+}
+
+// ProjectVerifyCommands returns a copy of projects.*.verifyCommands.
+func (c *Config) ProjectVerifyCommands(name string) []VerifyCommand {
+	if c == nil {
+		return nil
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	pc, ok := c.Projects[name]
+	if !ok {
+		return nil
+	}
+	return cloneVerifyCommands(pc.VerifyCommands)
+}
+
+// SetProjectVerifyCommands replaces verify commands and persists.
+// Each entry needs non-empty name and command. Empty list clears.
+func (c *Config) SetProjectVerifyCommands(name string, cmds []VerifyCommand) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("project name is required")
+	}
+	clean := make([]VerifyCommand, 0, len(cmds))
+	for _, cmd := range cmds {
+		n := strings.TrimSpace(cmd.Name)
+		co := strings.TrimSpace(cmd.Command)
+		if n == "" || co == "" {
+			return fmt.Errorf("verify command requires name and command")
+		}
+		to := cmd.TimeoutMs
+		if to < 0 {
+			return fmt.Errorf("timeoutMs must be >= 0")
+		}
+		clean = append(clean, VerifyCommand{Name: n, Command: co, TimeoutMs: to})
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	pc, ok := c.Projects[name]
+	if !ok {
+		return fmt.Errorf("project %q not found", name)
+	}
+	if len(clean) == 0 {
+		pc.VerifyCommands = nil
+	} else {
+		pc.VerifyCommands = clean
+	}
+	c.Projects[name] = pc
+	return c.saveLocked()
 }
 
 // ProjectRepoFetchIntervalMinutes returns the effective idle auto-fetch

@@ -732,4 +732,14 @@ func preserveModeFields(next *sessionstore.Entry, prev sessionstore.Entry) {
 	if next.EscalatedBy == "" {
 		next.EscalatedBy = prev.EscalatedBy
 	}
+	// Wave 2: never drop checkpoints / open questions / verify card id on Set rebuilds.
+	if len(next.Checkpoints) == 0 && len(prev.Checkpoints) > 0 {
+		next.Checkpoints = append([]sessionstore.CheckpointMeta(nil), prev.Checkpoints...)
+	}
+	if len(next.OpenQuestions) == 0 && len(prev.OpenQuestions) > 0 {
+		next.OpenQuestions = append([]sessionstore.OpenQuestion(nil), prev.OpenQuestions...)
+	}
+	if next.VerifyMsgID == "" {
+		next.VerifyMsgID = prev.VerifyMsgID
+	}
 }
