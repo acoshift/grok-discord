@@ -1,19 +1,22 @@
 {{define "content"}}
-<p class="sub" style="margin-bottom:0.5rem">
+<p class="pr-crumb">
   {{if .PRNumber}}
   <a href="/prs/{{.ActiveOwner}}/{{.ActiveRepo}}/{{.PRNumber}}{{if .Project}}?project={{urlquery .Project}}{{end}}">← PR</a>
+  <span class="crumb-sep">/</span>
+  <span class="mono">{{.ActiveOwner}}/{{.ActiveRepo}}#{{.PRNumber}}</span>
   {{else if .ThreadID}}
   <a href="/sessions/{{.ThreadID}}{{if .Project}}?project={{urlquery .Project}}{{end}}">← Session</a>
+  <span class="crumb-sep">/</span>
+  <span class="mono">{{.ThreadID}}</span>
   {{end}}
 </p>
-<h1 id="page-diff">{{.Title}}</h1>
-<p class="sub">
-  {{if and .ThreadID (not .PRNumber)}}vs merge-base of <span class="mono">{{.DiffBase}}</span> · {{end}}
-  {{with .DiffReview}}{{len .Files}} files changed
-  {{if .TotalAdds}} <span class="rv-tadd">+{{.TotalAdds}}</span>{{end}}
-  {{if .TotalDels}} <span class="rv-tdel">−{{.TotalDels}}</span>{{end}}
-  {{end}}
-</p>
+<div class="pr-title-row">
+  <h1 id="page-diff">{{.Title}}</h1>
+</div>
+<div class="pr-meta">
+  {{if and .ThreadID (not .PRNumber)}}<span>vs merge-base of <span class="mono">{{.DiffBase}}</span></span>{{end}}
+  {{with .DiffReview}}<span class="mono">{{if .TotalAdds}}<span class="diff-add">+{{.TotalAdds}}</span> {{end}}{{if .TotalDels}}<span class="diff-del">−{{.TotalDels}}</span> · {{end}}{{len .Files}} files changed</span>{{end}}
+</div>
 {{if .Error}}<div class="flash err">{{.Error}}</div>{{end}}
 
 {{template "diff_review" .}}

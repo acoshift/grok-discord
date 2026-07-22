@@ -1,59 +1,80 @@
 {{define "content"}}
-<p class="sub" style="margin-bottom:0.5rem"><a href="/projects/{{.Project}}/linear">← Linear list</a></p>
-<h1 id="page-linear-detail">{{.LinearIssue.Identifier}}</h1>
-<p class="sub">
-  {{if .LinearIssue.URL}}<a href="{{.LinearIssue.URL}}" target="_blank" rel="noopener">Open in Linear ↗</a>{{end}}
+<p class="pr-crumb">
+  <a href="/projects/{{.Project}}/linear">← Linear</a>
+  <span class="crumb-sep">/</span>
+  <span class="mono">{{.LinearIssue.Identifier}}</span>
 </p>
+<div class="pr-title-row">
+  <h1 id="page-linear-detail">{{if .LinearIssue.Title}}{{.LinearIssue.Title}}{{else}}{{.LinearIssue.Identifier}}{{end}}</h1>
+  <div class="pr-head-links">
+    {{if .LinearIssue.URL}}<a class="btn btn-compact" href="{{.LinearIssue.URL}}" target="_blank" rel="noopener">Linear ↗</a>{{end}}
+  </div>
+</div>
+<div class="pr-meta">
+  {{if eq .LinearIssue.WorkState "FIXING"}}
+  <span class="badge status-fixing" title="Active Grok fix session">FIXING</span>
+  {{else if .LinearIssue.State}}
+  <span class="badge">{{.LinearIssue.State}}</span>
+  {{end}}
+  {{if .LinearIssue.TeamKey}}<span class="mono">team {{.LinearIssue.TeamKey}}</span>{{end}}
+</div>
 {{if .Flash}}<div class="flash">{{.Flash}}</div>{{end}}
 {{if .Error}}<div class="flash err">{{.Error}}</div>{{end}}
+
+<div class="pr-cols">
+<div class="pr-main">
+
 <div class="section card">
-  <h2>{{.LinearIssue.Title}}</h2>
-  <p class="sub" style="margin:0">
-    {{if eq .LinearIssue.WorkState "FIXING"}}
-    <span class="badge status-fixing" title="Active Grok fix session">FIXING</span>
-    {{else}}
-    <span class="badge">{{.LinearIssue.State}}</span>
-    {{end}}
-    · team <span class="mono">{{.LinearIssue.TeamKey}}</span>
-  </p>
-  {{if .LinearIssue.Description}}<div class="md" style="margin-top:1rem">{{markdown .LinearIssue.Description}}</div>{{else}}<p class="muted" style="margin:1rem 0 0">No description.</p>{{end}}
+  <h2>Description</h2>
+  {{if .LinearIssue.Description}}<div class="md">{{markdown .LinearIssue.Description}}</div>{{else}}<p class="muted" style="margin:0">No description.</p>{{end}}
 </div>
 
+</div>{{/* /pr-main */}}
+
+<aside class="pr-rail">
+
 {{if and .CanStartSession .LinearEnabled}}
-<div class="section card" id="linear-fix-form">
-  <h2>Fix with Grok</h2>
-  <p class="sub">Starts or reuses a Discord work unit for this Linear issue (Fixes bind). Do not merge from Grok.</p>
+<div class="rail-group" id="linear-fix-form">
+  <div class="rail-group-title">Grok</div>
   {{if .ShowFixPicker}}
-  <p class="flash">Multiple sessions already bind this issue. Pick one, or force a new thread.</p>
-  <div class="table-scroll">
-  <table class="table">
-    <thead><tr><th>Thread</th><th>Label</th><th>Goal</th><th></th></tr></thead>
-    <tbody>
-    {{range .FixHits}}
-      <tr>
-        <td class="mono">{{.ThreadID}}</td>
-        <td><span class="badge">{{.Label}}</span>{{if .Busy}} <span class="badge live">busy</span>{{end}}</td>
-        <td>{{.Goal}}</td>
-        <td class="row-actions">
-          <form method="post" action="/projects/{{$.Project}}/linear/{{$.LinearIssue.Identifier}}/fix" style="display:inline">
-            {{template "csrf" $}}
-            <input type="hidden" name="thread_id" value="{{.ThreadID}}">
-            <button type="submit" class="btn-secondary" style="height:2rem;font-size:0.82rem;">Continue</button>
-          </form>
-        </td>
-      </tr>
-    {{end}}
-    </tbody>
-  </table>
+  <p class="rail-note">Multiple sessions bind this issue — continue one:</p>
+  {{range .FixHits}}
+  <div class="grok-pick">
+    <div class="grok-pick-head">
+      <span class="badge">{{.Label}}</span>
+      {{if .Busy}}<span class="badge live">busy</span>{{end}}
+      <a class="tid mono" href="/sessions/{{.ThreadID}}{{if $.Project}}?project={{urlquery $.Project}}{{end}}">{{.ThreadID}}</a>
+    </div>
+    {{if .Goal}}<div class="grok-pick-goal">{{.Goal}}</div>{{end}}
+    <form method="post" action="/projects/{{$.Project}}/linear/{{$.LinearIssue.Identifier}}/fix" class="grok-pick-actions">
+      {{template "csrf" $}}
+      <input type="hidden" name="thread_id" value="{{.ThreadID}}">
+      <button type="submit" class="btn-secondary btn-compact">Continue</button>
+    </form>
   </div>
+  {{else}}
+  <p class="rail-note">No candidates (they may be terminal).</p>
   {{end}}
-  <form method="post" action="/projects/{{.Project}}/linear/{{.LinearIssue.Identifier}}/fix">
+  <p class="rail-note">Or dispatch a fresh thread:</p>
+  {{end}}
+  <form method="post" action="/projects/{{.Project}}/linear/{{.LinearIssue.Identifier}}/fix" class="grok-dispatch">
     {{template "csrf" $}}
-    <label class="check">
-      <input type="checkbox" name="force_new" value="1"> Always start new thread
-    </label>
+    {{if .ShowFixPicker}}
+    <input type="hidden" name="force_new" value="1">
+    {{else}}
+    <label class="check"><input type="checkbox" name="force_new" value="1"> Always start a new thread</label>
+    {{end}}
     <div class="form-actions"><button type="submit" id="btn-fix-linear">Fix with Grok</button></div>
   </form>
+  <p class="rail-note">Starts or reuses a Discord work unit (Fixes bind). Grok opens/updates a PR; it never merges.</p>
+</div>
+{{else}}
+<div class="rail-group">
+  <div class="rail-group-title">Actions</div>
+  <p class="rail-note">Read-only access — Grok dispatch needs a member role with web features enabled.</p>
 </div>
 {{end}}
+
+</aside>
+</div>{{/* /pr-cols */}}
 {{end}}

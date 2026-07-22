@@ -1,50 +1,59 @@
 {{define "content"}}
-<p class="sub" style="margin-bottom:0.5rem">
+<p class="pr-crumb">
   <a href="/projects/{{.Project}}/commits?owner={{urlquery .ActiveOwner}}&amp;repo={{urlquery .ActiveRepo}}">← Commits</a>
+  <span class="crumb-sep">/</span>
+  <span class="mono">{{.ActiveOwner}}/{{.ActiveRepo}}{{if .Commit.ShortSHA}} @ {{.Commit.ShortSHA}}{{end}}</span>
 </p>
-<h1 id="page-commit-detail" class="mono">{{if .Commit.ShortSHA}}{{.Commit.ShortSHA}}{{else}}commit{{end}}</h1>
-<p class="sub">
-  <span class="mono">{{.ActiveOwner}}/{{.ActiveRepo}}</span>
-  {{if .Commit.SHA}} · <span class="mono" title="{{.Commit.SHA}}">{{.Commit.SHA}}</span>{{end}}
-</p>
+<div class="pr-title-row">
+  <h1 id="page-commit-detail">{{if .Commit.Subject}}{{.Commit.Subject}}{{else if .Commit.ShortSHA}}{{.Commit.ShortSHA}}{{else}}commit{{end}}</h1>
+</div>
+{{if .Commit.SHA}}
+<div class="pr-meta">
+  <span class="mono" title="{{.Commit.SHA}}">{{.Commit.SHA}}</span>
+  {{if .Commit.AuthorName}}<span>{{.Commit.AuthorName}}{{if .Commit.AuthorEmail}} <span class="mono">&lt;{{.Commit.AuthorEmail}}&gt;</span>{{end}}</span>{{end}}
+  {{if not .Commit.AuthorDate.IsZero}}<span class="mono">{{.Commit.AuthorDate.Format "2006-01-02 15:04 MST"}}</span>{{end}}
+  {{with .DiffReview}}<span class="mono">{{if .TotalAdds}}<span class="diff-add">+{{.TotalAdds}}</span> {{end}}{{if .TotalDels}}<span class="diff-del">−{{.TotalDels}}</span> · {{end}}{{len .Files}} files</span>{{end}}
+</div>
+{{end}}
 {{if .Flash}}<div class="flash">{{.Flash}}</div>{{end}}
 {{if .Error}}<div class="flash err">{{.Error}}</div>{{end}}
 
 {{if .Commit.SHA}}
+<div class="pr-cols">
+<div class="pr-main">
+
 <div class="section card">
-  <h2 style="margin-top:0;font-size:1.05rem;">{{.Commit.Subject}}</h2>
-  <p class="sub" style="margin:0.35rem 0 0;">
-    {{.Commit.AuthorName}}
-    {{if .Commit.AuthorEmail}}&lt;{{.Commit.AuthorEmail}}&gt;{{end}}
-    {{if not .Commit.AuthorDate.IsZero}} · {{.Commit.AuthorDate.Format "2006-01-02 15:04 MST"}}{{end}}
-  </p>
+  <h2>Message</h2>
   {{if .Commit.Body}}
-  <pre class="bubble-body" style="margin-top:0.75rem;white-space:pre-wrap;">{{.Commit.Body}}</pre>
-  {{end}}
-  {{with .DiffReview}}
-  <p class="sub" style="margin:0.75rem 0 0;">{{len .Files}} files changed
-    {{if .TotalAdds}} <span class="rv-tadd">+{{.TotalAdds}}</span>{{end}}
-    {{if .TotalDels}} <span class="rv-tdel">−{{.TotalDels}}</span>{{end}}
-  </p>
+  <pre class="bubble-body" style="margin:0;white-space:pre-wrap;">{{.Commit.Body}}</pre>
+  {{else}}
+  <p class="muted" style="margin:0">No extended message.</p>
   {{end}}
 </div>
 
-<div class="section card" style="margin-top:1rem;">
-  <h2 style="margin-top:0;font-size:1rem;">Review</h2>
-  <p class="sub">Starts a new Discord thread (or web session) so Grok can review this commit with full tools and open GitHub issues agentically — labels, commit links, related refs.</p>
+</div>{{/* /pr-main */}}
+
+<aside class="pr-rail">
+
+<div class="rail-group" id="commit-review-actions">
+  <div class="rail-group-title">Grok</div>
   {{if .CanReviewCommit}}
-  <form method="post" action="/projects/{{.Project}}/commits/{{.Commit.SHA}}/review" class="toolbar" hx-boost="false">
+  <form method="post" action="/projects/{{.Project}}/commits/{{.Commit.SHA}}/review" class="grok-dispatch" hx-boost="false">
     {{template "csrf" .}}
     <input type="hidden" name="owner" value="{{.ActiveOwner}}">
     <input type="hidden" name="repo" value="{{.ActiveRepo}}">
-    <button type="submit" class="btn">Review in new session</button>
+    <div class="form-actions"><button type="submit">Review in new session</button></div>
   </form>
+  <p class="rail-note">Starts a new Discord thread (or web session) so Grok can review this commit with full tools and open GitHub issues agentically — labels, commit links, related refs.</p>
   {{else}}
-  <p class="muted">Requires member role with <span class="mono">startSessions</span> enabled.</p>
+  <p class="rail-note">Requires member role with <span class="mono">startSessions</span> enabled.</p>
   {{end}}
 </div>
 
-<div class="section" style="margin-top:1rem;">
+</aside>
+</div>{{/* /pr-cols */}}
+
+<div class="section">
   {{template "diff_review" .}}
 </div>
 {{end}}

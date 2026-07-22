@@ -1,12 +1,19 @@
 {{define "content"}}
-<p class="sub" style="margin-bottom:0.5rem">
+<p class="pr-crumb">
   {{if .Project}}
   <a href="/projects/{{.Project}}/sessions">← Sessions</a>
   {{else}}
   <a href="{{route "history"}}">← History</a>
   {{end}}
+  <span class="crumb-sep">/</span>
+  <span class="mono">{{.Thread.ThreadID}}</span>
 </p>
-<h1 id="page-history-detail">Thread conversation</h1>
+<div class="pr-title-row">
+  <h1 id="page-history-detail">Turn log</h1>
+  <div class="pr-head-links">
+    <a class="btn btn-compact" href="/sessions/{{.Thread.ThreadID}}{{if .NavProject}}?project={{urlquery .NavProject}}{{else if .Thread.Project}}?project={{urlquery .Thread.Project}}{{end}}">Work unit</a>
+  </div>
+</div>
 {{/* hx-target/hx-select override shell boost (#live-root) so SSE partials swap into the region, not wipe the page. */}}
 <div class="live-region"
      id="live-history-turns"
@@ -21,12 +28,11 @@
 {{end}}
 
 {{define "history_turns"}}
-<p class="sub">
+<div class="pr-meta">
+  {{if .Thread.Project}}<span><strong>{{.Thread.Project}}</strong></span>{{end}}
   <span class="mono">{{.Thread.ThreadID}}</span>
-  {{if .Thread.Project}} · <strong>{{.Thread.Project}}</strong>{{end}}
-  · {{len .Thread.Turns}} turn{{if ne (len .Thread.Turns) 1}}s{{end}}
-  · <a href="/sessions/{{.Thread.ThreadID}}{{if .NavProject}}?project={{urlquery .NavProject}}{{else if .Thread.Project}}?project={{urlquery .Thread.Project}}{{end}}">Work unit</a>
-</p>
+  <span>{{len .Thread.Turns}} turn{{if ne (len .Thread.Turns) 1}}s{{end}}</span>
+</div>
 
 {{if .Thread.Turns}}
 <div class="turns" id="turns">

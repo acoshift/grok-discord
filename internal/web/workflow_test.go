@@ -629,7 +629,7 @@ func TestSessionDiffMissingWorktreeShowsError(t *testing.T) {
 	}
 	sess := w.Body.String()
 	// Match the anchor itself (layout CSS also mentions aria-disabled).
-	if !strings.Contains(sess, `href="/sessions/gone-wt/diff?project=proj" class="muted" aria-disabled="true" title="Worktree no longer on disk">Worktree diff</a>`) {
+	if !strings.Contains(sess, `class="btn btn-compact" href="/sessions/gone-wt/diff?project=proj" aria-disabled="true" title="Worktree no longer on disk">Worktree diff</a>`) {
 		t.Fatalf("want disabled Worktree diff link, got %s", sess)
 	}
 }

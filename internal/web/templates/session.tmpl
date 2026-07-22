@@ -1,21 +1,34 @@
 {{define "content"}}
-<p class="sub" style="margin-bottom:0.5rem"><a href="{{if .Project}}/projects/{{.Project}}/sessions{{else}}{{route "sessions"}}{{end}}">← Sessions</a></p>
-<h1 id="page-session">Session <span class="mono" style="font-weight:500;font-size:1.05rem;color:var(--muted)">{{.ThreadID}}</span></h1>
-<p class="sub">
-  {{if .Project}}<strong>{{.Project}}</strong> · {{end}}
-  {{if .DiscordURL}}<a href="{{.DiscordURL}}" target="_blank" rel="noopener">Open in Discord ↗</a> · {{end}}
-  <a href="/history/{{.ThreadID}}{{if .Project}}?project={{urlquery .Project}}{{end}}">Turn log</a>
-  {{if .HasWorktree}}
-  · <a href="/sessions/{{.ThreadID}}/diff{{if .Project}}?project={{urlquery .Project}}{{end}}">Worktree diff</a>
-  {{else}}
-  · <a href="/sessions/{{.ThreadID}}/diff{{if .Project}}?project={{urlquery .Project}}{{end}}" class="muted" aria-disabled="true" title="Worktree no longer on disk">Worktree diff</a>
-  {{end}}
+<p class="pr-crumb">
+  <a href="{{if .Project}}/projects/{{.Project}}/sessions{{else}}{{route "sessions"}}{{end}}">← Sessions</a>
+  <span class="crumb-sep">/</span>
+  <span class="mono">{{.ThreadID}}</span>
 </p>
+<div class="pr-title-row">
+  <h1 id="page-session">Session <span class="mono" style="font-weight:500;font-size:1.05rem;color:var(--muted)">{{.ThreadID}}</span></h1>
+  <div class="pr-head-links">
+    {{if .HasWorktree}}
+    <a class="btn btn-compact" href="/sessions/{{.ThreadID}}/diff{{if .Project}}?project={{urlquery .Project}}{{end}}">Worktree diff</a>
+    {{else}}
+    <a class="btn btn-compact" href="/sessions/{{.ThreadID}}/diff{{if .Project}}?project={{urlquery .Project}}{{end}}" aria-disabled="true" title="Worktree no longer on disk">Worktree diff</a>
+    {{end}}
+    <a class="btn btn-compact" href="/history/{{.ThreadID}}{{if .Project}}?project={{urlquery .Project}}{{end}}">Turn log</a>
+    {{if .DiscordURL}}<a class="btn btn-compact" href="{{.DiscordURL}}" target="_blank" rel="noopener">Discord ↗</a>{{end}}
+  </div>
+</div>
+{{if .Project}}
+<div class="pr-meta">
+  <span><strong>{{.Project}}</strong></span>
+</div>
+{{end}}
 {{if .Flash}}<div class="flash">{{.Flash}}</div>{{end}}
 {{if .Error}}<div class="flash err">{{.Error}}</div>{{end}}
 
+<div class="pr-cols">
+<div class="pr-main">
+
 {{/* Live work-unit + turns: dashboard ticks while a run is active (elapsed + stream text);
-     history fires when a turn is sealed into the log. Continue form stays outside so SSE
+     history fires when a turn is sealed into the log. Continue form stays in the rail so SSE
      swaps do not wipe in-progress prompt text. */}}
 <div class="live-region"
      id="live-session"
@@ -28,18 +41,37 @@
   {{template "session_live" .}}
 </div>
 
+</div>{{/* /pr-main */}}
+
+<aside class="pr-rail">
+
 {{if .CanStartSession}}
-<div class="section card" id="session-continue-form">
-  <h2>Continue with Grok</h2>
-  <p class="sub">Queue a follow-up on this work unit only (does not create a new Discord thread).</p>
-  <form method="post" action="/sessions/{{.ThreadID}}/continue">
-    {{template "csrf" $}}
-    <label for="continue-prompt">Prompt</label>
-    <textarea id="continue-prompt" name="prompt" rows="4" required placeholder="What should Grok do next?"></textarea>
-    <div class="form-actions"><button type="submit" id="btn-continue">Continue</button></div>
-  </form>
+<div class="rail-group" id="session-continue-form">
+  <div class="rail-group-title">Grok</div>
+  <details class="action" open>
+    <summary><span class="action-title">Continue with Grok</span></summary>
+    <div class="action-body">
+      <form method="post" action="/sessions/{{.ThreadID}}/continue">
+        {{template "csrf" $}}
+        <div class="field">
+          <label for="continue-prompt">Prompt</label>
+          <textarea id="continue-prompt" name="prompt" rows="4" required placeholder="What should Grok do next?"></textarea>
+        </div>
+        <div class="form-actions"><button type="submit" id="btn-continue">Continue</button></div>
+      </form>
+      <p class="rail-note" style="margin-top:0.55rem">Queues a follow-up on this work unit only (does not create a new Discord thread).</p>
+    </div>
+  </details>
+</div>
+{{else}}
+<div class="rail-group">
+  <div class="rail-group-title">Actions</div>
+  <p class="rail-note">Read-only access — continuing this work unit needs a member role with <span class="mono">startSessions</span> enabled.</p>
 </div>
 {{end}}
+
+</aside>
+</div>{{/* /pr-cols */}}
 {{end}}
 
 {{define "session_live"}}

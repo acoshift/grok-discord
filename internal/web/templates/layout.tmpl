@@ -1092,7 +1092,10 @@
       }
     }
 
-    /* ── PR detail (ship): header, gate strip, action rail ───────────── */
+    /* ── Detail pages (ship PR, issue, Linear, commit, session, turn log):
+       crumb + title row + meta strip, gate strip, main/rail columns.
+       Classes keep the pr- prefix from the ship detail page that defined
+       the pattern; all detail templates share them. ─────────────────── */
     .pr-crumb {
       display: flex;
       flex-wrap: wrap;
@@ -1117,10 +1120,12 @@
     .pr-title-row h1 { margin: 0; flex: 1 1 22rem; }
     .pr-head-links {
       display: flex;
+      flex-wrap: wrap;
       gap: 0.45rem;
       flex-shrink: 0;
       padding-top: 0.2rem;
     }
+    .pr-head-links .btn[aria-disabled="true"] { opacity: 0.55; }
     .pr-meta {
       display: flex;
       flex-wrap: wrap;
