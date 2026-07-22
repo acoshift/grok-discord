@@ -112,21 +112,26 @@ func BuildRunPolicy(in PolicyInput) RunPolicy {
 
 	phase := strings.TrimSpace(strings.ToLower(in.SessionPhase))
 
-	// Case closed: reject runs (PrefixKind none) — handler should not enqueue.
+	// Case closed: PrefixKind none + investigate-grade gates (defense if a run still starts).
 	if mode == ModeCase && phase == sessionstore.PhaseClosed {
+		empty := ""
 		return RunPolicy{
 			Mode: ModeCase, Phase: phase, RunKind: rk,
+			AllowPR: false, AllowDirectShip: false, AllowDirectIntegrate: false,
+			Yolo: false, Tools: &empty, NoSubagents: true, IncludeGHToken: false,
 			PrefixKind: "none", PostCompletion: "none",
-			Coerced: coerced,
+			RefreshPR: false, RefreshBrief: false, AllowUpload: false,
+			DirtyTreeWarn: false, Coerced: coerced,
 		}
 	}
 
-	// Case non-ship phases + investigate/explain: non-shipping (K27).
-	caseNonShip := mode == ModeCase && isCaseNonShipPhase(phase)
+	// Explicit investigate/explain run kinds stay non-ship even on fixing/shipping cases.
+	// Case non-ship phases + investigate/explain modes: non-shipping (K27).
+	caseNonShip := mode == ModeCase && (isCaseNonShipPhase(phase) || rk == RunKindInvestigate || rk == RunKindExplain)
 	if mode == ModeInvestigate || mode == ModeExplain || caseNonShip {
 		if mode == ModeCase {
-			// Keep Mode=case; phase stays; run kind investigate unless explicit
-			if rk == RunKindFix {
+			// Keep Mode=case; phase stays; run kind investigate unless explicit explain
+			if rk == RunKindFix || rk == "" {
 				rk = RunKindInvestigate
 			}
 		}

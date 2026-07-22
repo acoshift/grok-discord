@@ -51,6 +51,17 @@ func (b *Bot) handleCase(s *discordgo.Session, m *discordgo.MessageCreate, parse
 		threadID = th.ID
 	}
 
+	// Refuse clobber: closed cases and non-case eng threads.
+	if e, ok := b.sessions.Get(threadID); ok {
+		if e.IsCaseClosed() {
+			replyText(s, m, "This case is **closed**. Open a new thread with `@Grok /case …` (reopen is not implemented).")
+			return
+		}
+		if e.Mode != "" && !e.IsCase() {
+			replyText(s, m, "This thread is already a **"+e.Mode+"** session, not a case. Start `/case` in a new message outside this thread.")
+			return
+		}
+	}
 	actor := ActorFromUser(m.Author)
 	if err := b.ensureCaseShell(threadID, proj.Name, actor, severity, ref, title, "discord"); err != nil {
 		replyText(s, m, "Could not open case: "+err.Error())
@@ -215,6 +226,17 @@ func (b *Bot) handleCustomerUpdate(s *discordgo.Session, m *discordgo.MessageCre
 		replyText(s, m, "This thread is not a case.")
 		return
 	}
+	if e.IsCaseClosed() {
+		replyText(s, m, "This case is **closed**. Customer text is frozen.")
+		return
+	}
+	if b.cfg != nil && m.Author != nil {
+		caps := b.cfg.ResolveCapabilities(e.Project, m.Author.ID, memberRoles(m))
+		if !caps.DraftCustomerReply && !canEscalateCase(caps) {
+			replyText(s, m, "You're not allowed to draft customer updates (need draftCustomerReply).")
+			return
+		}
+	}
 	raw := stripCmdPrefix(parsed.Prompt, "/customer-update", "customer-update", "/update", "update")
 	if raw == "" {
 		// Show current
@@ -256,6 +278,17 @@ func (b *Bot) handleAnswer(s *discordgo.Session, m *discordgo.MessageCreate, par
 	if !ok || !e.IsCase() {
 		replyText(s, m, "This thread is not a case.")
 		return
+	}
+	if e.IsCaseClosed() {
+		replyText(s, m, "This case is **closed**. Reopen is not implemented.")
+		return
+	}
+	if b.cfg != nil && m.Author != nil {
+		caps := b.cfg.ResolveCapabilities(e.Project, m.Author.ID, memberRoles(m))
+		if !caps.DraftCustomerReply && !canEscalateCase(caps) {
+			replyText(s, m, "You're not allowed to mark cases answered (need draftCustomerReply or escalate caps).")
+			return
+		}
 	}
 	note := stripCmdPrefix(parsed.Prompt, "/answer", "answer")
 	_, _, err := b.sessions.Patch(m.ChannelID, func(ent *sessionstore.Entry) {

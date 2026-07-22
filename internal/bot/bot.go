@@ -1314,6 +1314,27 @@ func (b *Bot) executeTask(ctx context.Context, item taskItem, job *runJob) {
 	shipMode := b.ensureShipMode(threadID, proj.Name)
 	// Resolve run policy (bot-enforced gates). Prefer snapshot from enqueue (K19).
 	pol := b.resolveRunPolicy(threadID, proj.Name, item, shipMode, actor)
+	// Live closed-case check: queue drain after /close and web StartTask (not enqueue-only).
+	caseClosed := false
+	if b.sessions != nil {
+		if e, ok := b.sessions.Get(threadID); ok && e.IsCaseClosed() {
+			caseClosed = true
+			pol = BuildRunPolicy(PolicyInput{
+				SessionMode: ModeCase, SessionPhase: sessionstore.PhaseClosed,
+				Caps: config.Capabilities{}, ShipMode: shipMode,
+			})
+		}
+	}
+	if caseClosed || pol.PrefixKind == "none" {
+		msg := "This case is **closed**. Not starting a run."
+		if present && item.statusMsgID != "" {
+			b.postOrEditThreadStatus(s, threadID, item.statusMsgID, msg, actionBarDone(threadID, b.sessionWebURL(threadID)))
+		} else if present && s != nil {
+			sendChunks(s, threadID, msg)
+		}
+		log.Printf("task: skip closed case thread=%s", threadID)
+		return
+	}
 	// Stamp session Mode from policy when empty or investigate/start set it.
 	b.ensureSessionMode(threadID, pol.Mode)
 	// open → in_progress on first real work (manual labels stay sticky).
@@ -1519,6 +1540,9 @@ func (b *Bot) executeTask(ctx context.Context, item taskItem, job *runJob) {
 		prefix = investigatePromptPrefix(wtBranch)
 	case "explain":
 		prefix = explainPromptPrefix()
+	case "none":
+		// Should not reach here (bail above); refuse remote prefix.
+		prefix = investigatePromptPrefix(wtBranch)
 	case "remote":
 		// Escalation package for case fixing (K4)
 		if pol.Mode == ModeCase {
@@ -1916,14 +1940,27 @@ func (b *Bot) resolveRunPolicy(threadID, project string, item taskItem, shipMode
 	if b.cfg != nil {
 		tools = b.cfg.ProjectInvestigateTools(project)
 	}
-	// Case + start investigate → keep Mode=case, request investigate run under case.
+	// Case + start investigate/explain → keep Mode=case; force non-ship run kind.
+	reqRunKind := item.snapRunKind
 	if sessionMode == ModeCase || reqMode == ModeCase {
 		reqMode = ModeCase
-		if forceInv || item.parsed.Kind == KindStartInvestigate {
+		switch item.parsed.Kind {
+		case KindStartInvestigate:
 			if sessionPhase == "" || sessionPhase == sessionstore.PhaseIntake || sessionPhase == sessionstore.PhaseAnswered {
 				sessionPhase = sessionstore.PhaseInvestigate
 			}
-			forceInv = false // don't wipe case mode
+			forceInv = false
+			reqRunKind = RunKindInvestigate
+		case KindStartExplain:
+			forceInv = false
+			reqRunKind = RunKindExplain
+		}
+		if forceInv || (item.snapRunKind == RunKindInvestigate && item.parsed.Kind != KindStartFix) {
+			// snap was investigate; don't wipe case mode
+			forceInv = false
+			if reqRunKind == "" {
+				reqRunKind = RunKindInvestigate
+			}
 		}
 	}
 	in := PolicyInput{
@@ -1933,7 +1970,7 @@ func (b *Bot) resolveRunPolicy(threadID, project string, item taskItem, shipMode
 		Caps:             caps,
 		ConfigYolo:       b.cfg != nil && b.cfg.YoloEnabled(),
 		RequestedMode:    reqMode,
-		RequestedRunKind: item.snapRunKind,
+		RequestedRunKind: reqRunKind,
 		ForceInvestigate: forceInv,
 		InvestigateTools: tools,
 	}
@@ -2000,22 +2037,32 @@ func (b *Bot) snapshotPolicyOntoItem(item *taskItem, project string, roleIDs []s
 	}
 	reqMode := sessionMode
 	forceInv := false
+	reqRunKind := ""
 	switch item.parsed.Kind {
 	case KindStartInvestigate:
 		if sessionMode == ModeCase {
-			// Keep case; promote phase
+			// Keep case; promote phase only from non-ship phases; always non-ship run kind
 			reqMode = ModeCase
+			reqRunKind = RunKindInvestigate
 			if sessionPhase == "" || sessionPhase == sessionstore.PhaseIntake || sessionPhase == sessionstore.PhaseAnswered {
 				b.promoteCasePhaseBeforeRun(item.threadID, sessionstore.PhaseInvestigate)
 				sessionPhase = sessionstore.PhaseInvestigate
 			}
+			// On fixing/shipping: leave phase; BuildRunPolicy uses RunKindInvestigate → non-ship
 		} else {
 			reqMode = ModeInvestigate
 			forceInv = true
+			reqRunKind = RunKindInvestigate
 		}
 	case KindStartExplain:
-		reqMode = ModeExplain
-		forceInv = false
+		if sessionMode == ModeCase {
+			reqMode = ModeCase
+			reqRunKind = RunKindExplain
+		} else {
+			reqMode = ModeExplain
+			forceInv = false
+			reqRunKind = RunKindExplain
+		}
 	case KindStartFix:
 		if sessionMode == ModeCase {
 			// Same as /escalate (K17): require escalate caps; never silently promote.
@@ -2053,6 +2100,7 @@ func (b *Bot) snapshotPolicyOntoItem(item *taskItem, project string, roleIDs []s
 		Caps:             caps,
 		ConfigYolo:       b.cfg != nil && b.cfg.YoloEnabled(),
 		RequestedMode:    reqMode,
+		RequestedRunKind: reqRunKind,
 		ForceInvestigate: forceInv,
 		InvestigateTools: invTools,
 	})

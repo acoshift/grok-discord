@@ -37,6 +37,10 @@ func ParseDossierFromReply(text string) *sessionstore.Dossier {
 }
 
 func tryParseDossierJSON(raw string) *sessionstore.Dossier {
+	// Enforce size before store (ClampCaseFields error is ignored on hot path).
+	if len(raw) > 32*1024 {
+		return nil
+	}
 	var m map[string]any
 	if err := json.Unmarshal([]byte(raw), &m); err != nil {
 		return nil
@@ -89,7 +93,14 @@ func MergeDossier(dst *sessionstore.Dossier, src *sessionstore.Dossier) *session
 		dst.KnownBugHits = append([]string(nil), src.KnownBugHits...)
 	}
 	if len(src.NextActions) > 0 {
-		dst.NextActions = append([]string(nil), src.NextActions...)
+		// Preserve escalate notes from dst (handleEscalate stores them here).
+		var keep []string
+		for _, a := range dst.NextActions {
+			if strings.HasPrefix(a, "Escalate note:") {
+				keep = append(keep, a)
+			}
+		}
+		dst.NextActions = append(keep, src.NextActions...)
 	}
 	if src.UpdatedAt != "" {
 		dst.UpdatedAt = src.UpdatedAt

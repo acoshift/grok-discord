@@ -206,6 +206,12 @@ func (b *Bot) StartTask(opts StartTaskOpts) (queuePos int, err error) {
 		item.createdBy = opts.Actor.ID
 		item.createdByName = opts.Actor.DisplayName
 	}
+	// Web path: refuse closed cases before enqueue (executeTask also checks live).
+	if b.sessions != nil {
+		if e, ok := b.sessions.Get(threadID); ok && e.IsCaseClosed() {
+			return 0, fmt.Errorf("case is closed")
+		}
+	}
 	b.snapshotPolicyOntoItem(&item, opts.Proj.Name, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())

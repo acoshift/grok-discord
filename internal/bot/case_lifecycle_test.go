@@ -205,6 +205,69 @@ func TestEnsureCaseShellAndCloseFreeze(t *testing.T) {
 	}
 }
 
+func TestStartInvestigateOnFixingCaseIsNonShip(t *testing.T) {
+	// Advisor bug 2: /start investigate during Phase=fixing must not ship.
+	pol := BuildRunPolicy(PolicyInput{
+		SessionMode:      ModeCase,
+		SessionPhase:     sessionstore.PhaseFixing,
+		RequestedMode:    ModeCase,
+		RequestedRunKind: RunKindInvestigate,
+		Caps:             config.BuiltinCapabilityTemplates["builder"],
+		ConfigYolo:       true,
+		ShipMode:         sessionstore.ShipModePR,
+	})
+	if pol.AllowPR || pol.AllowDirectIntegrate {
+		t.Fatalf("investigate run kind on fixing case must not ship: %+v", pol)
+	}
+	if pol.PrefixKind != "investigate" {
+		t.Fatalf("PrefixKind=%q", pol.PrefixKind)
+	}
+	// Phase stays fixing in policy metadata for board; mode stays case
+	if pol.Mode != ModeCase {
+		t.Fatalf("Mode=%q", pol.Mode)
+	}
+}
+
+func TestClosedCasePolicyIsNoneWithSafeTools(t *testing.T) {
+	pol := BuildRunPolicy(PolicyInput{
+		SessionMode:  ModeCase,
+		SessionPhase: sessionstore.PhaseClosed,
+		Caps:         config.BuiltinCapabilityTemplates["builder"],
+		ConfigYolo:   true,
+		ShipMode:     sessionstore.ShipModeDirect,
+	})
+	if pol.PrefixKind != "none" {
+		t.Fatalf("PrefixKind=%q", pol.PrefixKind)
+	}
+	if pol.AllowPR || pol.AllowDirectIntegrate || pol.Yolo || pol.IncludeGHToken {
+		t.Fatalf("closed must not ship: %+v", pol)
+	}
+	if pol.Tools == nil {
+		t.Fatal("closed case must set Tools non-nil (tools-off)")
+	}
+}
+
+func TestSanitizeGitHubPAT(t *testing.T) {
+	raw := "Use ghp_abcdefghijklmnopqrstuvwxyz012345 and github_pat_11AAAA_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+	clean, hits := SanitizeCustomerUpdate(raw)
+	if strings.Contains(clean, "ghp_") || strings.Contains(clean, "github_pat_") {
+		t.Fatalf("PAT leaked: %q hits=%v", clean, hits)
+	}
+}
+
+func TestMergeDossierKeepsEscalateNote(t *testing.T) {
+	dst := &sessionstore.Dossier{NextActions: []string{"Escalate note: please own", "old"}}
+	src := &sessionstore.Dossier{Summary: "new", NextActions: []string{"add tests"}}
+	got := MergeDossier(dst, src)
+	joined := strings.Join(got.NextActions, "|")
+	if !strings.Contains(joined, "Escalate note:") {
+		t.Fatalf("lost escalate note: %v", got.NextActions)
+	}
+	if !strings.Contains(joined, "add tests") {
+		t.Fatalf("lost src actions: %v", got.NextActions)
+	}
+}
+
 // /start fix on Mode=case must not escalate when actor lacks FileEscalation|GithubWrites|StartSessions
 // (same gate as /escalate). Drives real snapshotPolicyOntoItem.
 func TestStartFixOnCaseDeniedWithoutEscalateCaps(t *testing.T) {
