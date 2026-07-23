@@ -650,6 +650,15 @@ func (s *Server) sessionPageData(ctx *hime.Context, threadID string) pageData {
 	if s.bot != nil {
 		d.QueueItems = s.bot.QueueItems(threadID)
 	}
+	// Case panel affordances when Mode=case.
+	if d.SessionEntry.IsCase() && d.CanStartSession {
+		caps := s.cfg.ResolveCapabilities(d.SessionEntry.Project, d.UserID, nil)
+		closed := d.SessionEntry.IsCaseClosed()
+		d.CanCaseEscalate = !closed && bot.CanEscalateCaseCaps(caps)
+		d.CanCaseDraft = !closed && bot.CanDraftCaseCaps(caps)
+		d.CanCaseClose = !closed && d.CanControlSession
+		d.CanCaseInvestigate = !closed && (caps.Investigate || caps.FileEscalation || caps.StartSessions || d.CanControlSession)
+	}
 	return d
 }
 

@@ -253,7 +253,7 @@ func TestPagesRender(t *testing.T) {
 			events []string
 		}{
 			{"/", []string{`hx-trigger="sse:dashboard, sse:ship, sse:history"`, `hx-trigger="sse:dashboard"`}},
-			{"/projects/proj", []string{`hx-trigger="sse:dashboard, sse:ship"`}},
+			{"/projects/proj", []string{`hx-trigger="sse:dashboard, sse:ship, sse:cases"`}},
 			{"/projects/proj/cases", []string{`hx-trigger="sse:cases"`, "/partials/cases/pipeline?project=proj", "/partials/cases/list?project=proj"}},
 			{"/projects/proj/worktrees", []string{`hx-trigger="sse:worktrees"`, "/partials/worktrees/table?project=proj"}},
 			{"/ship", []string{`hx-trigger="sse:ship"`}},

@@ -15,7 +15,7 @@
 <div class="live-region"
      id="live-project-pulse"
      hx-get="{{route "partial.project.pulse"}}?project={{urlquery .Project}}"
-     hx-trigger="sse:dashboard, sse:ship"
+     hx-trigger="sse:dashboard, sse:ship, sse:cases"
      hx-target="this"
      hx-select="unset"
      hx-swap="innerHTML"
@@ -77,6 +77,21 @@
     <div class="label">CI failing</div>
     <div class="value" id="pulse-failing">{{.Ship.ChecksFailing}}</div>
     <div class="hint">{{if gt .Ship.ChecksFailing 0}}<span class="badge status-error">needs attention</span>{{else}}all green{{end}}</div>
+  </div>
+  <div class="card">
+    <div class="label">Open cases</div>
+    <div class="value" id="pulse-cases-open">{{.Cases.OpenTotal}}</div>
+    <div class="hint"><a href="/projects/{{.Project}}/cases">case board</a>{{if gt .Cases.Closed 0}} · {{.Cases.Closed}} closed{{end}}</div>
+  </div>
+  <div class="card">
+    <div class="label">Looking into it</div>
+    <div class="value" id="pulse-cases-investigate">{{.Cases.Investigate}}</div>
+    <div class="hint">{{.Cases.Intake}} intake · {{.Cases.Answered}} answered</div>
+  </div>
+  <div class="card">
+    <div class="label">With engineering</div>
+    <div class="value" id="pulse-cases-eng">{{add .Cases.Fixing .Cases.Shipping}}</div>
+    <div class="hint">{{.Cases.Fixing}} fixing · {{.Cases.Shipping}} shipping</div>
   </div>
 </div>
 {{if .Status.ActiveRuns}}

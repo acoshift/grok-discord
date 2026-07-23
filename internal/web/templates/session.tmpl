@@ -7,6 +7,9 @@
 <div class="pr-title-row">
   <h1 id="page-session">Session <span class="mono" style="font-weight:500;font-size:1.05rem;color:var(--muted)">{{.ThreadID}}</span></h1>
   <div class="pr-head-links">
+    {{if .SessionEntry.IsCase}}
+    <a class="btn btn-compact" href="/projects/{{.SessionEntry.Project}}/cases">Case board</a>
+    {{end}}
     {{if .HasWorktree}}
     <a class="btn btn-compact" href="/sessions/{{.ThreadID}}/diff{{if .Project}}?project={{urlquery .Project}}{{end}}">Worktree diff</a>
     {{else}}
@@ -19,6 +22,10 @@
 {{if .Project}}
 <div class="pr-meta">
   <span><strong>{{.Project}}</strong></span>
+  {{if .SessionEntry.IsCase}}
+  <span class="badge">case</span>
+  {{if .SessionEntry.Phase}}<span class="badge">{{.SessionEntry.Phase}}</span>{{end}}
+  {{end}}
 </div>
 {{end}}
 {{if .Flash}}<div class="flash">{{.Flash}}</div>{{end}}
@@ -44,6 +51,98 @@
 </div>{{/* /pr-main */}}
 
 <aside class="pr-rail">
+
+{{if and .SessionEntry.IsCase (or .CanCaseInvestigate .CanCaseEscalate .CanCaseDraft .CanCaseClose)}}
+{{/* Case phase forms stay outside the live region so SSE swaps do not wipe typed notes. */}}
+<div class="rail-group" id="session-case-actions">
+  <div class="rail-group-title">Case</div>
+  {{if .CanCaseInvestigate}}
+  <details class="action" open>
+    <summary><span class="action-title">Investigate</span></summary>
+    <div class="action-body">
+      <form method="post" action="/sessions/{{.ThreadID}}/case/investigate">
+        {{template "csrf" $}}
+        <div class="field">
+          <label for="case-investigate-notes">Notes</label>
+          <textarea id="case-investigate-notes" name="notes" rows="3" placeholder="What should Grok look into?"></textarea>
+        </div>
+        <div class="form-actions"><button type="submit" id="btn-case-investigate">Run investigate</button></div>
+      </form>
+      <p class="rail-note" style="margin-top:0.55rem">Never opens PRs. Promotes intake → investigate.</p>
+    </div>
+  </details>
+  {{end}}
+  {{if .CanCaseEscalate}}
+  <details class="action">
+    <summary><span class="action-title">Escalate to eng</span></summary>
+    <div class="action-body">
+      <form method="post" action="/sessions/{{.ThreadID}}/case/escalate">
+        {{template "csrf" $}}
+        <div class="field">
+          <label for="case-escalate-note">Note for eng <span class="muted">(optional)</span></label>
+          <textarea id="case-escalate-note" name="note" rows="2" placeholder="Repro, IDs, what you already ruled out"></textarea>
+        </div>
+        <div class="form-actions"><button type="submit" id="btn-case-escalate" class="btn-secondary">Escalate → fixing</button></div>
+      </form>
+    </div>
+  </details>
+  {{end}}
+  {{if .CanCaseDraft}}
+  <details class="action">
+    <summary><span class="action-title">Answer (knowledge path)</span></summary>
+    <div class="action-body">
+      <form method="post" action="/sessions/{{.ThreadID}}/case/answer">
+        {{template "csrf" $}}
+        <div class="field">
+          <label for="case-answer-note">Draft for customer <span class="muted">(optional)</span></label>
+          <textarea id="case-answer-note" name="note" rows="2" placeholder="Safe wording for the customer"></textarea>
+        </div>
+        <div class="form-actions"><button type="submit" id="btn-case-answer" class="btn-secondary">Mark answered</button></div>
+      </form>
+    </div>
+  </details>
+  <details class="action">
+    <summary><span class="action-title">Customer update</span></summary>
+    <div class="action-body">
+      <form method="post" action="/sessions/{{.ThreadID}}/case/customer-update">
+        {{template "csrf" $}}
+        <div class="field">
+          <label for="case-customer-text">Customer-facing text</label>
+          <textarea id="case-customer-text" name="text" rows="3" required placeholder="What you can send the customer">{{.SessionEntry.CustomerUpdate}}</textarea>
+        </div>
+        <div class="form-actions"><button type="submit" id="btn-case-customer">Save update</button></div>
+      </form>
+      <p class="rail-note" style="margin-top:0.55rem">Sanitizer redacts secrets and local paths.</p>
+    </div>
+  </details>
+  {{end}}
+  {{if .CanCaseClose}}
+  <details class="action">
+    <summary><span class="action-title">Close case</span></summary>
+    <div class="action-body">
+      <form method="post" action="/sessions/{{.ThreadID}}/case/close" onsubmit="return confirm('Close this case? Reopen is not implemented.')">
+        {{template "csrf" $}}
+        <div class="field">
+          <label for="case-resolution">Resolution</label>
+          <select id="case-resolution" name="resolution">
+            <option value="answered">answered</option>
+            <option value="fixed">fixed</option>
+            <option value="duplicate">duplicate</option>
+            <option value="wontfix">wontfix</option>
+            <option value="escalated_external">escalated_external</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="case-close-note">Note <span class="muted">(optional)</span></label>
+          <input type="text" id="case-close-note" name="note" placeholder="Short resolution note">
+        </div>
+        <div class="form-actions"><button type="submit" id="btn-case-close" class="btn-danger">Close case</button></div>
+      </form>
+    </div>
+  </details>
+  {{end}}
+</div>
+{{end}}
 
 {{if .CanStartSession}}
 <div class="rail-group" id="session-continue-form">
@@ -138,6 +237,40 @@
 {{end}}
 
 {{define "session_live"}}
+{{if .SessionEntry.IsCase}}
+<div class="section card" id="session-case-panel">
+  <h2>Case <span class="muted" style="font-weight:500;font-size:0.9rem">· {{if .SessionEntry.Phase}}{{.SessionEntry.Phase}}{{else}}intake{{end}}</span></h2>
+  <p class="sub" style="margin:0">
+    <span class="badge">case</span>
+    {{if .SessionEntry.Phase}}<span class="badge">{{.SessionEntry.Phase}}</span>{{end}}
+    {{if .SessionEntry.Severity}}<span class="badge sev-{{.SessionEntry.Severity}}">{{.SessionEntry.Severity}}</span>{{end}}
+    {{if .SessionEntry.IsCaseClosed}}<span class="badge">closed</span>{{end}}
+  </p>
+  {{if .SessionEntry.CustomerTitle}}
+  <p style="margin:0.85rem 0 0"><span class="bubble-label" style="display:block">Title</span>{{.SessionEntry.CustomerTitle}}</p>
+  {{end}}
+  <p class="sub" style="margin:0.5rem 0 0">
+    {{if .SessionEntry.CustomerRef}}ref <span class="mono">{{.SessionEntry.CustomerRef}}</span> · {{end}}
+    {{if .SessionEntry.ReporterName}}reporter {{.SessionEntry.ReporterName}}{{else if .SessionEntry.ReporterID}}reporter <span class="mono">{{.SessionEntry.ReporterID}}</span>{{end}}
+    {{if .SessionEntry.IntakeSource}} · via <span class="mono">{{.SessionEntry.IntakeSource}}</span>{{end}}
+    {{if .SessionEntry.Resolution}} · resolution <span class="mono">{{.SessionEntry.Resolution}}</span>{{end}}
+  </p>
+  {{if .SessionEntry.CustomerUpdate}}
+  <p style="margin:0.85rem 0 0"><span class="bubble-label" style="display:block">Customer update</span>{{.SessionEntry.CustomerUpdate}}</p>
+  {{end}}
+  {{if .SessionEntry.Dossier}}
+  {{if .SessionEntry.Dossier.Summary}}
+  <p style="margin:0.85rem 0 0"><span class="bubble-label" style="display:block">Dossier</span>{{.SessionEntry.Dossier.Summary}}</p>
+  {{end}}
+  {{if .SessionEntry.Dossier.NextActions}}
+  <p style="margin:0.55rem 0 0"><span class="bubble-label" style="display:block">Next actions</span>
+    {{range $i, $a := .SessionEntry.Dossier.NextActions}}{{if $i}}; {{end}}{{$a}}{{end}}
+  </p>
+  {{end}}
+  {{end}}
+</div>
+{{end}}
+
 <div class="section card">
   <h2>Work unit</h2>
   <p class="sub" style="margin:0">

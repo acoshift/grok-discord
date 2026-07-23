@@ -280,6 +280,18 @@ func New(cfg *config.Config, sessions *sessionstore.Store, hist *history.Store, 
 		s.requireFeature("startSessions", s.requireMember(hime.Handler(s.postSessionGoal))))
 	mux.Handle("POST /sessions/{threadID}/claim",
 		s.requireFeature("startSessions", s.requireMember(hime.Handler(s.postSessionClaim))))
+	// Case phase actions (Mode=case) — feature gate startSessions so members can act;
+	// per-action caps checked in handlers (investigate vs escalate vs draft).
+	mux.Handle("POST /sessions/{threadID}/case/escalate",
+		s.requireFeature("startSessions", s.requireMember(hime.Handler(s.postCaseEscalate))))
+	mux.Handle("POST /sessions/{threadID}/case/answer",
+		s.requireFeature("startSessions", s.requireMember(hime.Handler(s.postCaseAnswer))))
+	mux.Handle("POST /sessions/{threadID}/case/close",
+		s.requireFeature("startSessions", s.requireMember(hime.Handler(s.postCaseClose))))
+	mux.Handle("POST /sessions/{threadID}/case/customer-update",
+		s.requireFeature("startSessions", s.requireMember(hime.Handler(s.postCaseCustomerUpdate))))
+	mux.Handle("POST /sessions/{threadID}/case/investigate",
+		s.requireFeature("startSessions", s.requireMember(hime.Handler(s.postCaseInvestigate))))
 	// Commit review → new Discord/web session; Grok opens issues agentically
 	mux.Handle("POST /projects/{project}/commits/{sha}/review",
 		s.requireFeature("startSessions", s.requireMember(hime.Handler(s.postCommitReview))))
@@ -469,6 +481,11 @@ type pageData struct {
 	// Case intake (/projects/{project}/cases/new + board CTAs): Discord /case
 	// parity — startSessions feature+role AND investigator-class capability.
 	CanOpenCase bool
+	// Session case panel affordances (Mode=case only).
+	CanCaseEscalate    bool
+	CanCaseDraft       bool // answer + customer-update
+	CanCaseClose       bool // owner/co/admin
+	CanCaseInvestigate bool
 }
 
 func (s *Server) basePage(ctx *hime.Context) pageData {

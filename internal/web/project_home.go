@@ -242,12 +242,16 @@ func filterWorktreesProject(list []bot.WorktreeInfo, project string) []bot.Workt
 	return out
 }
 
-// projectPulseData backs the overview's live region: scoped runs + open PRs.
+// projectPulseData backs the overview's live region: scoped runs + open PRs + case pipeline.
 func (s *Server) projectPulseData(ctx *hime.Context, project string) pageData {
 	d := s.basePage(ctx)
 	d.Project = project
 	d.Status = statusForProject(s.bot.StatusSnapshot(), project)
 	d.Ship = s.bot.ListShipBoard(project, "open")
+	if s.bot != nil {
+		// Unfiltered pipeline counts (scope open for OpenTotal; board still has Closed).
+		d.Cases = s.bot.ListCaseBoard(project, "", "", "all")
+	}
 	return d
 }
 
