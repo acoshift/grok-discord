@@ -101,6 +101,166 @@ func TestFeatureOffRejectsWrites(t *testing.T) {
 	}
 }
 
+// captureCommentBodies returns a write-enabled server whose gh runner records
+// issue/PR comment body-file contents (real path used by ghpr.Comment*).
+func captureCommentBodies(t *testing.T) (*Server, *config.Config, *[]string) {
+	t.Helper()
+	srv, cfg, _ := writeEnabledServer(t)
+	var bodies []string
+	srv.ghRunner = func(ctx context.Context, dir, name string, args ...string) ([]byte, error) {
+		joined := name + " " + strings.Join(args, " ")
+		switch {
+		case strings.Contains(joined, "issue comment"), strings.Contains(joined, "pr comment"):
+			for i, a := range args {
+				if a == "--body-file" && i+1 < len(args) {
+					b, err := os.ReadFile(args[i+1])
+					if err != nil {
+						t.Fatal(err)
+					}
+					bodies = append(bodies, string(b))
+				}
+			}
+			return []byte("ok"), nil
+		case strings.Contains(joined, "issue close"):
+			return []byte("ok"), nil
+		case strings.Contains(joined, "issue view"):
+			return []byte(`{
+				"number":7,"url":"https://github.com/acme/app/issues/7","title":"Open bug",
+				"state":"OPEN","author":{"login":"alice"},"labels":[],
+				"body":"steps","comments":[]
+			}`), nil
+		case strings.Contains(joined, "pr view"):
+			return []byte(`{
+				"number":9,"url":"https://github.com/acme/app/pull/9","title":"T","state":"OPEN",
+				"isDraft":false,"reviewDecision":"APPROVED","headRefOid":"a","headRefName":"f",
+				"baseRefName":"main","body":"b","mergeable":"MERGEABLE","author":{"login":"z"},
+				"additions":1,"deletions":0,"changedFiles":1
+			}`), nil
+		default:
+			t.Fatalf("unexpected: %s", joined)
+			return nil, nil
+		}
+	}
+	return srv, cfg, &bodies
+}
+
+func TestIssueCommentOnBehalfOfMapped(t *testing.T) {
+	srv, cfg, bodies := captureCommentBodies(t)
+	if err := cfg.SetGitHubIdentity("member-1", config.GitHubIdentity{Login: "member-gh", Name: "Member"}); err != nil {
+		t.Fatal(err)
+	}
+	sid, csrf, err := srv.LoginAs("member-1", "M", config.WebRoleMember)
+	if err != nil {
+		t.Fatal(err)
+	}
+	form := url.Values{
+		"body": {"hello issue"}, "owner": {"acme"}, "repo": {"app"}, "csrf": {csrf},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/projects/proj/issues/7/comments", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sid})
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusFound && w.Code != http.StatusSeeOther {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if len(*bodies) != 1 {
+		t.Fatalf("bodies=%v", *bodies)
+	}
+	got := (*bodies)[0]
+	if !strings.HasPrefix(got, "On behalf of @member-gh (Discord member-1 / M):\n\n") {
+		t.Fatalf("want On behalf of prefix, got:\n%s", got)
+	}
+	if !strings.HasSuffix(got, "hello issue") {
+		t.Fatalf("body lost:\n%s", got)
+	}
+}
+
+func TestIssueCommentUnmappedUnchanged(t *testing.T) {
+	srv, _, bodies := captureCommentBodies(t)
+	sid, csrf, err := srv.LoginAs("member-1", "M", config.WebRoleMember)
+	if err != nil {
+		t.Fatal(err)
+	}
+	form := url.Values{
+		"body": {"raw only"}, "owner": {"acme"}, "repo": {"app"}, "csrf": {csrf},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/projects/proj/issues/7/comments", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sid})
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusFound && w.Code != http.StatusSeeOther {
+		t.Fatalf("status=%d", w.Code)
+	}
+	if len(*bodies) != 1 || (*bodies)[0] != "raw only" {
+		t.Fatalf("bodies=%v", *bodies)
+	}
+	if strings.Contains((*bodies)[0], "On behalf of") {
+		t.Fatal("unmapped must not invent prefix")
+	}
+}
+
+func TestPRCommentOnBehalfOfMapped(t *testing.T) {
+	srv, cfg, bodies := captureCommentBodies(t)
+	if err := cfg.SetGitHubIdentity("member-1", config.GitHubIdentity{Login: "@mem"}); err != nil {
+		t.Fatal(err)
+	}
+	sid, csrf, err := srv.LoginAs("member-1", "Mem", config.WebRoleMember)
+	if err != nil {
+		t.Fatal(err)
+	}
+	form := url.Values{
+		"body": {"lgtm"}, "project": {"proj"}, "csrf": {csrf},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/prs/acme/app/9/comments", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sid})
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusFound && w.Code != http.StatusSeeOther {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if len(*bodies) != 1 {
+		t.Fatalf("bodies=%v", *bodies)
+	}
+	got := (*bodies)[0]
+	if !strings.HasPrefix(got, "On behalf of @mem (Discord member-1 / Mem):\n\n") {
+		t.Fatalf("prefix:\n%s", got)
+	}
+	if !strings.HasSuffix(got, "lgtm") {
+		t.Fatalf("body:\n%s", got)
+	}
+}
+
+func TestIssueCloseCommentOnBehalfOfMapped(t *testing.T) {
+	srv, cfg, bodies := captureCommentBodies(t)
+	if err := cfg.SetGitHubIdentity("member-1", config.GitHubIdentity{Login: "closer"}); err != nil {
+		t.Fatal(err)
+	}
+	sid, csrf, err := srv.LoginAs("member-1", "M", config.WebRoleMember)
+	if err != nil {
+		t.Fatal(err)
+	}
+	form := url.Values{
+		"body": {"done here"}, "owner": {"acme"}, "repo": {"app"}, "csrf": {csrf},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/projects/proj/issues/7/close", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sid})
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusFound && w.Code != http.StatusSeeOther {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if len(*bodies) != 1 {
+		t.Fatalf("bodies=%v (close posts one comment)", *bodies)
+	}
+	if !strings.HasPrefix((*bodies)[0], "On behalf of @closer") {
+		t.Fatalf("close comment body:\n%s", (*bodies)[0])
+	}
+}
+
 func TestMemberCommentAndClose(t *testing.T) {
 	srv, _, calls := writeEnabledServer(t)
 	sid, csrf, err := srv.LoginAs("member-1", "M", config.WebRoleMember)

@@ -93,6 +93,43 @@ func TestBuildAttributionBlockUnmapped(t *testing.T) {
 	}
 }
 
+func TestOnBehalfOfCommentBodyMapped(t *testing.T) {
+	got := OnBehalfOfCommentBody("42", "Alice", "alice-gh", "please merge")
+	if !strings.HasPrefix(got, "On behalf of @alice-gh (Discord 42 / Alice):\n\n") {
+		t.Fatalf("prefix:\n%s", got)
+	}
+	if !strings.HasSuffix(got, "please merge") {
+		t.Fatalf("body lost:\n%s", got)
+	}
+	// @ stripped from login
+	got2 := OnBehalfOfCommentBody("9", "", "@bob", "x")
+	if !strings.HasPrefix(got2, "On behalf of @bob (Discord 9):\n\n") {
+		t.Fatalf("got2:\n%s", got2)
+	}
+}
+
+func TestOnBehalfOfCommentBodyUnmapped(t *testing.T) {
+	raw := "keep me"
+	if got := OnBehalfOfCommentBody("42", "Alice", "", raw); got != raw {
+		t.Fatalf("unmapped: %q", got)
+	}
+	if got := OnBehalfOfCommentBody("42", "Alice", "  ", raw); got != raw {
+		t.Fatalf("blank login: %q", got)
+	}
+	if got := OnBehalfOfCommentBody("42", "Alice", "@", raw); got != raw {
+		t.Fatalf("at-only: %q", got)
+	}
+}
+
+func TestOnBehalfOfCommentBodyEmpty(t *testing.T) {
+	if got := OnBehalfOfCommentBody("42", "Alice", "alice", ""); got != "" {
+		t.Fatalf("empty: %q", got)
+	}
+	if got := OnBehalfOfCommentBody("42", "Alice", "alice", "   \n"); got != "   \n" {
+		t.Fatalf("ws: %q", got)
+	}
+}
+
 func TestAttributionFooterBackwardCompat(t *testing.T) {
 	// Old call site shape still produces Discord attribution.
 	p := attributionFooter("bob", "42", "https://discord.com/x")

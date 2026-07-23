@@ -157,6 +157,9 @@ func TestPagesRender(t *testing.T) {
 		{"/config", "424242424242424242"},
 		{"/config", "Default Discord guild"},
 		{"/config", `href="/config/projects/proj"`},
+		{"/config", `id="github-attribution"`},
+		{"/config", "Discord user → GitHub login"},
+		{"/config", `id="github-identity-form"`},
 		// Per-project settings: four sub-tab pages (Access is the default).
 		{"/config/projects/proj", `id="page-project-config"`},
 		{"/config/projects/proj", `id="project-config-tabs"`},

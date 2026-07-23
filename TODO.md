@@ -83,9 +83,9 @@ See `docs/design-per-user-github-identity.md` Tier A. **Host still pushes/opens 
 - [x] Discord user → GitHub login map (`config.discordUserGitHub` + `SetGitHubIdentity` / `LookupGitHubIdentity`)
 - [x] Commit trailers + Co-authored-by / noreply email instructions in ship prompt (`BuildAttributionBlock`)
 - [x] PR body footer: Discord prompter, mapped `@login`, thread URL, session id
-- [ ] Web comment prefix “On behalf of …” when map exists (optional follow-up)
+- [x] Web comment prefix “On behalf of …” when map exists (`OnBehalfOfCommentBody` on PR/issue comment + issue close)
 - [ ] Optional: use map for `/review @user` → GitHub review request
-- [ ] Web UI for editing the Discord→GitHub map (config JSON works today)
+- [x] Web UI for editing the Discord→GitHub map (`/config` → GitHub map section)
 
 ### 2. Governance depth — **partial**
 

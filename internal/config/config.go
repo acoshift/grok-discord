@@ -184,16 +184,16 @@ type ChannelItem struct {
 
 // Snapshot is a read-only copy of config fields used by the web UI.
 type Snapshot struct {
-	Projects            []ProjectItem
-	Channels            []ChannelItem
-	ProjectNames        []string
-	HTTPListen          string
-	GrokBin             string
-	Model               string
-	MaxTurns            int // effective (default 40)
-	TimeoutMs           int // effective (default 1800000 = 30m)
-	Yolo                bool
-	WorktreeIsolation   bool
+	Projects          []ProjectItem
+	Channels          []ChannelItem
+	ProjectNames      []string
+	HTTPListen        string
+	GrokBin           string
+	Model             string
+	MaxTurns          int // effective (default 40)
+	TimeoutMs         int // effective (default 1800000 = 30m)
+	Yolo              bool
+	WorktreeIsolation bool
 	// WorktreeDir is the configured override (empty = default under DataDir).
 	WorktreeDir string
 	// WorktreesRoot is the effective absolute root for new worktrees.
@@ -224,6 +224,16 @@ type Snapshot struct {
 	FeatureGitHubWrites bool
 	FeatureMerge        bool
 	FeaturePRReviews    bool
+	// GitHubIdentities is the Tier A Discord→GitHub map (sorted by Discord id).
+	GitHubIdentities []GitHubIdentityItem
+}
+
+// GitHubIdentityItem is one Discord user → GitHub profile row for the config UI.
+type GitHubIdentityItem struct {
+	DiscordUserID string
+	Login         string
+	Name          string
+	Email         string
 }
 
 // DefaultShutdownTimeoutMs is used when shutdownTimeoutMs is unset/invalid.
@@ -1023,6 +1033,22 @@ func (c *Config) Snapshot() Snapshot {
 		channels = append(channels, ChannelItem{ChannelID: id, Project: c.Channels[id]})
 	}
 
+	ghIDs := make([]string, 0, len(c.DiscordUserGitHub))
+	for id := range c.DiscordUserGitHub {
+		ghIDs = append(ghIDs, id)
+	}
+	slices.Sort(ghIDs)
+	githubIdentities := make([]GitHubIdentityItem, 0, len(ghIDs))
+	for _, id := range ghIDs {
+		ent := c.DiscordUserGitHub[id]
+		githubIdentities = append(githubIdentities, GitHubIdentityItem{
+			DiscordUserID: id,
+			Login:         strings.TrimPrefix(strings.TrimSpace(ent.Login), "@"),
+			Name:          strings.TrimSpace(ent.Name),
+			Email:         strings.TrimSpace(ent.Email),
+		})
+	}
+
 	idleDays := DefaultWorktreeIdleTTLDays
 	if c.WorktreeIdleTTLDays != nil {
 		idleDays = *c.WorktreeIdleTTLDays
@@ -1056,6 +1082,7 @@ func (c *Config) Snapshot() Snapshot {
 		Projects:            projects,
 		Channels:            channels,
 		ProjectNames:        names,
+		GitHubIdentities:    githubIdentities,
 		HTTPListen:          c.HTTPListen,
 		GrokBin:             c.GrokBin,
 		Model:               c.Model,

@@ -122,6 +122,8 @@ func New(cfg *config.Config, sessions *sessionstore.Store, hist *history.Store, 
 		"config.removeProjectRole":           "/config/projects/roles/remove",
 		"config.addChannel":                  "/config/channels",
 		"config.removeChannel":               "/config/channels/remove",
+		"config.setGitHubIdentity":           "/config/github-identities",
+		"config.removeGitHubIdentity":        "/config/github-identities/remove",
 		"config.settings":                    "/config/settings",
 		"issues":                             "/issues",
 		"issues.project":                     "/projects/",
@@ -344,6 +346,8 @@ func New(cfg *config.Config, sessions *sessionstore.Store, hist *history.Store, 
 	mux.Handle("POST /config/projects/roles/remove", s.requireAdmin(hime.Handler(s.removeProjectRole)))
 	mux.Handle("POST /config/channels", s.requireAdmin(hime.Handler(s.addChannel)))
 	mux.Handle("POST /config/channels/remove", s.requireAdmin(hime.Handler(s.removeChannel)))
+	mux.Handle("POST /config/github-identities", s.requireAdmin(hime.Handler(s.setGitHubIdentity)))
+	mux.Handle("POST /config/github-identities/remove", s.requireAdmin(hime.Handler(s.removeGitHubIdentity)))
 	mux.Handle("POST /config/settings", s.requireAdmin(hime.Handler(s.updateSettings)))
 
 	app.Handler(mux)
@@ -654,6 +658,13 @@ func (s *Server) configPage(ctx *hime.Context) error {
 	d.Config = s.cfg.Snapshot()
 	d.Flash = ctx.FormValue("ok")
 	d.Error = ctx.FormValue("err")
+	if len(d.Config.GitHubIdentities) > 0 {
+		ids := make([]string, 0, len(d.Config.GitHubIdentities))
+		for _, row := range d.Config.GitHubIdentities {
+			ids = append(ids, row.DiscordUserID)
+		}
+		d.DiscordUserNames = s.resolveDiscordUserNames(ids)
+	}
 	return s.viewPage(ctx, "config", d)
 }
 
@@ -1178,6 +1189,36 @@ func (s *Server) removeChannel(ctx *hime.Context) error {
 		return s.projectConfigTabRedirect(ctx, ctx.PostFormValue("project"), "integrations", msg, err)
 	}
 	return s.configRedirect(ctx, msg, err)
+}
+
+func (s *Server) setGitHubIdentity(ctx *hime.Context) error {
+	discordID := strings.TrimSpace(ctx.PostFormValue("discordUserId"))
+	login := strings.TrimSpace(ctx.PostFormValue("login"))
+	name := strings.TrimSpace(ctx.PostFormValue("name"))
+	email := strings.TrimSpace(ctx.PostFormValue("email"))
+	err := s.cfg.SetGitHubIdentity(discordID, config.GitHubIdentity{
+		Login: login, Name: name, Email: email,
+	})
+	s.auditAction(ctx, audit.ActionConfigSetGitHubIdent, err, map[string]any{
+		"discordUserId": discordID, "login": login,
+	})
+	if err != nil {
+		return s.configRedirect(ctx, "", err)
+	}
+	msg := fmt.Sprintf("Mapped Discord %s → @%s", discordID, strings.TrimPrefix(login, "@"))
+	return s.configRedirect(ctx, msg, nil)
+}
+
+func (s *Server) removeGitHubIdentity(ctx *hime.Context) error {
+	discordID := strings.TrimSpace(ctx.PostFormValue("discordUserId"))
+	err := s.cfg.RemoveGitHubIdentity(discordID)
+	s.auditAction(ctx, audit.ActionConfigRemoveGitHubIdent, err, map[string]any{
+		"discordUserId": discordID,
+	})
+	if err != nil {
+		return s.configRedirect(ctx, "", err)
+	}
+	return s.configRedirect(ctx, fmt.Sprintf("Removed GitHub map for Discord %s", discordID), nil)
 }
 
 func (s *Server) updateSettings(ctx *hime.Context) error {

@@ -481,6 +481,49 @@ func AttributionAuthorFields(in AttributionInput) (name, email string) {
 	return name, email
 }
 
+// OnBehalfOfCommentBody prefixes a host-bot GitHub comment when the acting Discord
+// user is mapped to a GitHub login. Unmapped actors and empty/whitespace-only bodies
+// are returned unchanged — no invented @login.
+//
+// Example (mapped):
+//
+//	On behalf of @alice (Discord 42 / Alice):
+//
+//	please merge when green
+func OnBehalfOfCommentBody(discordID, displayName, githubLogin, body string) string {
+	if strings.TrimSpace(body) == "" {
+		return body
+	}
+	login := strings.TrimPrefix(strings.TrimSpace(githubLogin), "@")
+	if login == "" {
+		return body
+	}
+	discordID = strings.TrimSpace(discordID)
+	displayName = strings.TrimSpace(displayName)
+	var who strings.Builder
+	who.WriteString("On behalf of @")
+	who.WriteString(login)
+	if discordID != "" || displayName != "" {
+		who.WriteString(" (Discord")
+		if discordID != "" {
+			who.WriteString(" ")
+			who.WriteString(discordID)
+		}
+		if displayName != "" {
+			if discordID != "" {
+				who.WriteString(" / ")
+			} else {
+				who.WriteString(" ")
+			}
+			who.WriteString(displayName)
+		}
+		who.WriteString(")")
+	}
+	who.WriteString(":\n\n")
+	who.WriteString(body)
+	return who.String()
+}
+
 // intentPreview truncates a prompt for queue display (~80 runes).
 func intentPreview(prompt string, maxRunes int) string {
 	prompt = strings.TrimSpace(prompt)

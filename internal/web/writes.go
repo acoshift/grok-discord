@@ -10,6 +10,7 @@ import (
 	"github.com/moonrhythm/hime"
 
 	"github.com/acoshift/grokwork/internal/audit"
+	"github.com/acoshift/grokwork/internal/bot"
 	"github.com/acoshift/grokwork/internal/config"
 	"github.com/acoshift/grokwork/internal/ghpr"
 )
@@ -62,6 +63,19 @@ func (s *Server) requireMember(next http.Handler) http.Handler {
 	}))
 }
 
+// attributeCommentBody prefixes host-bot GitHub comment bodies with
+// "On behalf of @login …" when the session Discord user is in the Tier A map.
+func (s *Server) attributeCommentBody(ctx *hime.Context, body string) string {
+	id, name := s.sessionDisplay(ctx)
+	login := ""
+	if s.cfg != nil {
+		if gh, ok := s.cfg.LookupGitHubIdentity(id); ok {
+			login = gh.Login
+		}
+	}
+	return bot.OnBehalfOfCommentBody(id, name, login, body)
+}
+
 func (s *Server) postIssueComment(ctx *hime.Context) error {
 	project := strings.TrimSpace(ctx.PathValue("project"))
 	n, err := strconv.Atoi(strings.TrimSpace(ctx.PathValue("n")))
@@ -70,7 +84,7 @@ func (s *Server) postIssueComment(ctx *hime.Context) error {
 	}
 	owner := strings.TrimSpace(ctx.PostFormValue("owner"))
 	repo := strings.TrimSpace(ctx.PostFormValue("repo"))
-	body := ctx.PostFormValue("body")
+	body := s.attributeCommentBody(ctx, ctx.PostFormValue("body"))
 	project, ref, path, err := s.resolveCatalogRepoAccess(ctx, project, owner, repo)
 	if err != nil {
 		return s.issueRedirect(ctx, project, owner, repo, n, "", err)
@@ -99,6 +113,7 @@ func (s *Server) postIssueClose(ctx *hime.Context) error {
 	if strings.TrimSpace(body) == "" {
 		return s.issueRedirect(ctx, project, owner, repo, n, "", fmt.Errorf("comment body required to close"))
 	}
+	body = s.attributeCommentBody(ctx, body)
 	project, ref, path, err := s.resolveCatalogRepoAccess(ctx, project, owner, repo)
 	if err != nil {
 		return s.issueRedirect(ctx, project, owner, repo, n, "", err)
@@ -123,7 +138,7 @@ func (s *Server) postPRComment(ctx *hime.Context) error {
 		return ctx.Status(http.StatusBadRequest).Error("invalid PR number")
 	}
 	project := strings.TrimSpace(ctx.PostFormValue("project"))
-	body := ctx.PostFormValue("body")
+	body := s.attributeCommentBody(ctx, ctx.PostFormValue("body"))
 	project, ref, cwd, err := s.resolveCatalogRepoAccess(ctx, project, owner, repo)
 	if err != nil {
 		return s.prRedirect(ctx, owner, repo, n, project, "", err)

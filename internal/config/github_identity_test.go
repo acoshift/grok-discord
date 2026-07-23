@@ -82,3 +82,72 @@ func TestNoreplyGitHubEmail(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+func TestSetGitHubIdentityRejectsEmptyLogin(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(path, []byte(`{
+  "discordToken": "tok",
+  "projects": {"app": {"path": "`+filepath.ToSlash(dir)+`", "allowedUserIds": ["u1"]}},
+  "channels": {},
+  "grokBin": "grok"
+}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg Config
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	cfg.ConfigPath = path
+	if err := cfg.SetGitHubIdentity("1", GitHubIdentity{Login: ""}); err == nil {
+		t.Fatal("expected error for empty login")
+	}
+	if err := cfg.SetGitHubIdentity("1", GitHubIdentity{Login: "  @  "}); err == nil {
+		t.Fatal("expected error for @-only login")
+	}
+	if err := cfg.SetGitHubIdentity("", GitHubIdentity{Login: "x"}); err == nil {
+		t.Fatal("expected error for empty discord id")
+	}
+	if _, ok := cfg.LookupGitHubIdentity("1"); ok {
+		t.Fatal("must not map on reject")
+	}
+}
+
+func TestSnapshotGitHubIdentitiesSorted(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(path, []byte(`{
+  "discordToken": "tok",
+  "projects": {"app": {"path": "`+filepath.ToSlash(dir)+`", "allowedUserIds": ["u1"]}},
+  "channels": {},
+  "grokBin": "grok"
+}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(path)
+	var cfg Config
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	cfg.ConfigPath = path
+	if err := cfg.SetGitHubIdentity("z-user", GitHubIdentity{Login: "z"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.SetGitHubIdentity("a-user", GitHubIdentity{Login: "@a", Name: "A"}); err != nil {
+		t.Fatal(err)
+	}
+	snap := cfg.Snapshot()
+	if len(snap.GitHubIdentities) != 2 {
+		t.Fatalf("len=%d", len(snap.GitHubIdentities))
+	}
+	if snap.GitHubIdentities[0].DiscordUserID != "a-user" || snap.GitHubIdentities[0].Login != "a" {
+		t.Fatalf("first=%+v", snap.GitHubIdentities[0])
+	}
+	if snap.GitHubIdentities[1].DiscordUserID != "z-user" {
+		t.Fatalf("second=%+v", snap.GitHubIdentities[1])
+	}
+}

@@ -2064,6 +2064,104 @@
       scroll-margin-top: 9.5rem;
     }
 
+    /* ── GitHub attribution map (config hub) ───────────────────────────
+       Signature: a thin identity bridge (Discord snowflake → @login) that
+       states the map’s only job without looking like a generic CRUD table. */
+    .gh-map-card { position: relative; }
+    .gh-map-eyebrow {
+      font-family: var(--mono);
+      font-size: 0.68rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin: 0 0 0.35rem;
+    }
+    .gh-map-header h2 { margin-bottom: 0.35rem; }
+    .gh-map-bridge {
+      display: flex;
+      align-items: center;
+      gap: 0.65rem;
+      margin: 0.85rem 0 1.1rem;
+      padding: 0.55rem 0.75rem;
+      border-radius: 0.55rem;
+      border: 1px dashed var(--border);
+      background:
+        linear-gradient(90deg, hsl(var(--black) / 3%) 0%, transparent 40%, transparent 60%, hsl(var(--black) / 3%) 100%);
+    }
+    @media (prefers-color-scheme: dark) {
+      .gh-map-bridge {
+        background:
+          linear-gradient(90deg, hsl(var(--white) / 4%) 0%, transparent 40%, transparent 60%, hsl(var(--white) / 4%) 100%);
+      }
+    }
+    .gh-map-node {
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      padding: 0.22rem 0.55rem;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .gh-map-node-github {
+      color: var(--text);
+      border-color: var(--hover-border);
+      background: var(--surface-l2);
+    }
+    .gh-map-rail {
+      flex: 1 1 auto;
+      height: 1px;
+      min-width: 1.5rem;
+      background: linear-gradient(90deg, var(--border), var(--hover-border), var(--border));
+      position: relative;
+    }
+    .gh-map-rail::after {
+      content: "→";
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      color: var(--muted);
+      background: var(--surface);
+      padding: 0 0.25rem;
+      line-height: 1;
+    }
+    .gh-map-form { margin-bottom: 1rem; }
+    .gh-map-fields {
+      display: grid;
+      grid-template-columns: 1.2fr 1fr 1fr 1.3fr;
+      gap: 0.65rem 0.75rem;
+      margin-bottom: 0.75rem;
+    }
+    @media (max-width: 900px) {
+      .gh-map-fields { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 560px) {
+      .gh-map-fields { grid-template-columns: 1fr; }
+      .gh-map-bridge { flex-wrap: wrap; }
+    }
+    .gh-map-table-wrap { margin-top: 0.35rem; }
+    .gh-map-table .gh-map-login {
+      font-weight: 600;
+      color: var(--text);
+    }
+    .gh-map-table .gh-map-display {
+      font-weight: 500;
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 0.88rem;
+    }
+    .gh-map-empty {
+      margin-top: 0.35rem;
+      border-style: dashed;
+    }
+
     /* ── Toolbar (compact filters above tables) ──────────────────────── */
     .toolbar {
       display: flex;
