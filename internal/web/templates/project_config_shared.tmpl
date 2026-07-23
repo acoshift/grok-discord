@@ -1,0 +1,17 @@
+{{define "project_config_header"}}
+<p class="sub" style="margin-bottom:0.5rem"><a href="{{route "config"}}">← Config</a></p>
+<h1><span class="mono">{{.ProjectItem.Name}}</span> <span class="muted" style="font-weight:500;font-size:1.05rem">· project settings</span></h1>
+<p class="sub">
+  <span class="mono">{{.ProjectItem.Path}}</span>
+  {{if .ProjectItem.LinearEnabled}} · <a href="/projects/{{.ProjectItem.Name}}/linear">Linear</a>{{end}}
+</p>
+<nav class="cfg-tabs" id="project-config-tabs">
+  <a href="/config/projects/{{.ProjectItem.Name}}" {{if eq .ProjectTab "access"}}class="active"{{end}}>Access <span class="count">{{add (len .ProjectItem.AllowedUserIDs) (len .ProjectItem.AllowedRoleIDs)}}</span></a>
+  <a href="/config/projects/{{.ProjectItem.Name}}/workflow" {{if eq .ProjectTab "workflow"}}class="active"{{end}}>Workflow</a>
+  <a href="/config/projects/{{.ProjectItem.Name}}/integrations" {{if eq .ProjectTab "integrations"}}class="active"{{end}}>Integrations</a>
+  <span class="spacer"></span>
+  <a href="/config/projects/{{.ProjectItem.Name}}/danger" class="tab-danger{{if eq .ProjectTab "danger"}} active{{end}}">Danger zone</a>
+</nav>
+{{if .Flash}}<div class="flash">{{.Flash}}</div>{{end}}
+{{if .Error}}<div class="flash err">{{.Error}}</div>{{end}}
+{{end}}

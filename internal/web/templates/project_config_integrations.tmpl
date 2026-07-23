@@ -1,0 +1,133 @@
+{{define "content"}}
+<div id="page-project-config-integrations">
+{{template "project_config_header" $}}
+
+<div class="section card" id="project-discord">
+  <h2>Discord</h2>
+  <p class="sub" style="margin-top:0">
+    Tagging <span class="mono">@Grok</span> in a mapped channel starts tasks for this project.
+    The preferred channel hosts threads for web-started work units.
+  </p>
+  {{if .ProjectItem.ChannelOptions}}
+  <div class="chip-row">
+    {{$pref := .ProjectItem.DiscordChannelID}}
+    {{range .ProjectItem.ChannelOptions}}
+    <span class="chip">{{.}}{{if eq . $pref}}<span class="pref">preferred</span>{{end}}
+      <form method="post" action="{{route "config.removeChannel"}}" onsubmit="return confirm('Unmap channel {{.}}?');">
+        {{template "csrf" $}}
+        <input type="hidden" name="channelId" value="{{.}}">
+        <input type="hidden" name="project" value="{{$.ProjectItem.Name}}">
+        <input type="hidden" name="return_to" value="project">
+        <button type="submit" title="Unmap channel">×</button>
+      </form>
+    </span>
+    {{end}}
+  </div>
+  {{else}}
+  <div class="empty" style="margin-bottom:0.85rem;">No channels mapped — tasks cannot start from Discord until one is.</div>
+  {{end}}
+  <form class="inline" method="post" action="{{route "config.addChannel"}}" style="grid-template-columns: 1fr auto;">
+    {{template "csrf" $}}
+    <input type="hidden" name="project" value="{{.ProjectItem.Name}}">
+    <input type="hidden" name="return_to" value="project">
+    <div>
+      <label for="project-add-channel">Discord channel ID</label>
+      <input id="project-add-channel" type="text" name="channelId" placeholder="123456789012345678" required autocomplete="off">
+    </div>
+    <button type="submit">Map channel</button>
+  </form>
+
+  <div style="border-top:1px solid var(--border); margin-top:1.1rem; padding-top:1rem;">
+    <form class="inline" method="post" action="{{route "config.setProjectChannel"}}" style="grid-template-columns: 1fr 1fr auto;">
+      {{template "csrf" $}}
+      <input type="hidden" name="name" value="{{.ProjectItem.Name}}">
+      <div>
+        <label for="project-channel">Preferred channel</label>
+        <select id="project-channel" name="channelId">
+          <option value="">(auto / reverse-map)</option>
+          {{$pref := .ProjectItem.DiscordChannelID}}
+          {{range .ProjectItem.ChannelOptions}}
+          <option value="{{.}}" {{if eq . $pref}}selected{{end}}>{{.}}</option>
+          {{end}}
+        </select>
+      </div>
+      <div>
+        <label for="project-guild">Discord guild ID</label>
+        <input id="project-guild" type="text" name="guildId" value="{{.ProjectItem.DiscordGuildID}}" placeholder="server snowflake" autocomplete="off">
+      </div>
+      <button type="submit">Save Discord</button>
+    </form>
+    <p class="sub" style="margin:0.5rem 0 0">
+      The guild ID makes “Open in Discord” deep-link the right server (multi-guild setups).
+      Empty falls back to the default guild on <a href="{{route "config"}}#default-guild">Config</a>.
+    </p>
+  </div>
+</div>
+
+<div class="section card" id="project-github">
+  <h2>GitHub repositories</h2>
+  <p class="sub" style="margin-top:0">
+    Multi-repo catalog for issues, commits, and PR tracking — one <span class="mono">owner/repo</span> per line.
+    Leave blank to discover from the checkout’s git remotes.
+  </p>
+  <form method="post" action="{{route "config.setProjectGitHub"}}">
+    {{template "csrf" $}}
+    <input type="hidden" name="name" value="{{.ProjectItem.Name}}">
+    <label for="project-repos">Repos</label>
+    <textarea id="project-repos" name="repos" rows="4" placeholder="acme/app&#10;acme/api">{{.ProjectItem.GitHubReposText}}</textarea>
+    <div class="form-actions"><button type="submit">Save repos</button></div>
+  </form>
+</div>
+
+<div class="section card" id="project-linear">
+  <h2>Linear</h2>
+  <p class="sub" style="margin-top:0">
+    Opt-in ticket binding for this project.
+    {{if .ProjectItem.LinearAPIKeySet}}<span class="badge status-done">API key set</span>{{else}}<span class="badge">no API key</span>{{end}}
+    · env alternative: <span class="mono">{{.ProjectItem.LinearEnvHint}}</span>
+  </p>
+  <form method="post" action="{{route "config.setProjectLinear"}}">
+    {{template "csrf" $}}
+    <input type="hidden" name="name" value="{{.ProjectItem.Name}}">
+    <div class="inline" style="grid-template-columns: auto 1fr 1fr; margin-bottom:0.65rem;">
+      <label class="check">
+        <input type="checkbox" name="enabled" value="1" {{if .ProjectItem.LinearEnabled}}checked{{end}}>
+        Enabled
+      </label>
+      <div>
+        <label for="project-linear-team">Team key</label>
+        <input id="project-linear-team" type="text" name="teamKey" value="{{.ProjectItem.LinearTeamKey}}" placeholder="ENG" autocomplete="off">
+      </div>
+      <div>
+        <label for="project-linear-key">API key</label>
+        <input id="project-linear-key" type="password" name="apiKey" placeholder="leave blank to keep" autocomplete="off">
+      </div>
+    </div>
+    <label class="check">
+      <input type="checkbox" name="clearApiKey" value="1"> Clear stored API key
+    </label>
+    <div class="form-actions"><button type="submit">Save Linear</button></div>
+  </form>
+</div>
+
+<div class="section card" id="project-repo-fetch">
+  <h2>Repo freshness</h2>
+  <p class="sub" style="margin-top:0">
+    While the bot is running, periodically run <span class="mono">git fetch --all --prune</span> on this project’s
+    main checkout so commits / remote-tracking refs stay fresh.
+    Default is <span class="mono">5</span> minutes when unset; <span class="mono">0</span> disables idle fetch.
+    Creating a new worktree always fetches with a short hardcoded throttle (5s), independent of this setting.
+  </p>
+  <form class="inline" method="post" action="{{route "config.setProjectFetch"}}" style="grid-template-columns: 12rem auto;">
+    {{template "csrf" $}}
+    <input type="hidden" name="name" value="{{.ProjectItem.Name}}">
+    <div>
+      <label for="project-fetch-interval">Idle interval (minutes)</label>
+      <input id="project-fetch-interval" type="number" name="repoFetchIntervalMinutes" min="0" step="1" required
+        value="{{.ProjectItem.RepoFetchIntervalMinutes}}" autocomplete="off">
+    </div>
+    <div class="form-actions" style="align-self:end"><button type="submit">Save</button></div>
+  </form>
+</div>
+</div>
+{{end}}

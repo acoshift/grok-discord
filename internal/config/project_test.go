@@ -143,6 +143,51 @@ func TestProjectSafeTeam(t *testing.T) {
 	}
 }
 
+func TestProjectSafeTeamPolicyAndDefaultMode(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &Config{
+		Projects: ProjectsMap{
+			"support": {Path: filepath.Join(dir, "support")},
+		},
+		ConfigPath: filepath.Join(dir, "config.json"),
+	}
+	if err := cfg.SetProjectDefaultMode("support", "case"); err != nil {
+		t.Fatal(err)
+	}
+	// Policy save must not clobber the separately-saved default mode.
+	if err := cfg.SetProjectSafeTeamPolicy("support", true, "operator"); err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.SafeTeamMode("support") {
+		t.Fatal("want SafeTeamMode on")
+	}
+	if cfg.SafeTeamDefaultTemplate("support") != "operator" {
+		t.Fatalf("default tpl=%q", cfg.SafeTeamDefaultTemplate("support"))
+	}
+	if cfg.ProjectDefaultMode("support") != "case" {
+		t.Fatalf("defaultMode=%q (policy save clobbered it)", cfg.ProjectDefaultMode("support"))
+	}
+	// And mode saves must not clobber policy.
+	if err := cfg.SetProjectDefaultMode("support", "investigate"); err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.SafeTeamMode("support") || cfg.SafeTeamDefaultTemplate("support") != "operator" {
+		t.Fatal("mode save clobbered policy")
+	}
+	if err := cfg.SetProjectSafeTeamPolicy("support", false, ""); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SafeTeamMode("support") {
+		t.Fatal("want off after clear")
+	}
+	if err := cfg.SetProjectSafeTeamPolicy("support", true, "not-a-tpl"); err == nil {
+		t.Fatal("want error for bad template")
+	}
+	if err := cfg.SetProjectDefaultMode("support", "nope"); err == nil {
+		t.Fatal("want error for bad defaultMode")
+	}
+}
+
 func TestProjectDirectToPrimary(t *testing.T) {
 	dir := t.TempDir()
 	cfg := &Config{

@@ -109,6 +109,8 @@ func New(cfg *config.Config, sessions *sessionstore.Store, hist *history.Store, 
 		"config.setProjectShip":              "/config/projects/ship",
 		"config.setProjectSafeTeam":          "/config/projects/safe-team",
 		"config.setProjectVerify":            "/config/projects/verify",
+		"config.setProjectMode":              "/config/projects/mode",
+		"config.addProjectMember":            "/config/projects/members",
 		"config.setProjectCapabilityUser":    "/config/projects/capabilities/users",
 		"config.removeProjectCapabilityUser": "/config/projects/capabilities/users/remove",
 		"config.setProjectCapabilityRole":    "/config/projects/capabilities/roles",
@@ -166,7 +168,10 @@ func New(cfg *config.Config, sessions *sessionstore.Store, hist *history.Store, 
 	tp.ParseFiles("case_new", "layout.tmpl", "case_new.tmpl")
 	tp.ParseFiles("worktrees", "layout.tmpl", "worktrees.tmpl")
 	tp.ParseFiles("config", "layout.tmpl", "config.tmpl")
-	tp.ParseFiles("project_config", "layout.tmpl", "project_config.tmpl")
+	tp.ParseFiles("project_config", "layout.tmpl", "project_config.tmpl", "project_config_shared.tmpl")
+	tp.ParseFiles("project_config_workflow", "layout.tmpl", "project_config_workflow.tmpl", "project_config_shared.tmpl")
+	tp.ParseFiles("project_config_integrations", "layout.tmpl", "project_config_integrations.tmpl", "project_config_shared.tmpl")
+	tp.ParseFiles("project_config_danger", "layout.tmpl", "project_config_danger.tmpl", "project_config_shared.tmpl")
 	tp.ParseFiles("login", "layout.tmpl", "login.tmpl")
 	tp.ParseFiles("issues", "layout.tmpl", "issues.tmpl")
 	tp.ParseFiles("issue_detail", "layout.tmpl", "issue_detail.tmpl")
@@ -206,6 +211,9 @@ func New(cfg *config.Config, sessions *sessionstore.Store, hist *history.Store, 
 	mux.Handle("GET /worktrees", s.requireAuth(hime.Handler(s.worktreesPage)))
 	mux.Handle("GET /config", s.requireAdmin(hime.Handler(s.configPage)))
 	mux.Handle("GET /config/projects/{name}", s.requireAdmin(hime.Handler(s.projectConfigPage)))
+	mux.Handle("GET /config/projects/{name}/workflow", s.requireAdmin(hime.Handler(s.projectConfigWorkflowPage)))
+	mux.Handle("GET /config/projects/{name}/integrations", s.requireAdmin(hime.Handler(s.projectConfigIntegrationsPage)))
+	mux.Handle("GET /config/projects/{name}/danger", s.requireAdmin(hime.Handler(s.projectConfigDangerPage)))
 	// Project workspace (project-first UX): overview + scoped list pages.
 	mux.Handle("GET /projects/{project}", s.requireAuth(hime.Handler(s.projectOverview)))
 	mux.Handle("GET /projects/{project}/start", s.requireAuth(hime.Handler(s.startComposer)))
@@ -322,6 +330,8 @@ func New(cfg *config.Config, sessions *sessionstore.Store, hist *history.Store, 
 	mux.Handle("POST /config/projects/fetch", s.requireAdmin(hime.Handler(s.setProjectFetch)))
 	mux.Handle("POST /config/projects/ship", s.requireAdmin(hime.Handler(s.setProjectShip)))
 	mux.Handle("POST /config/projects/safe-team", s.requireAdmin(hime.Handler(s.setProjectSafeTeam)))
+	mux.Handle("POST /config/projects/mode", s.requireAdmin(hime.Handler(s.setProjectMode)))
+	mux.Handle("POST /config/projects/members", s.requireAdmin(hime.Handler(s.addProjectMember)))
 	mux.Handle("POST /config/projects/verify", s.requireAdmin(hime.Handler(s.setProjectVerify)))
 	mux.Handle("POST /config/projects/capabilities/users", s.requireAdmin(hime.Handler(s.setProjectCapabilityUser)))
 	mux.Handle("POST /config/projects/capabilities/users/remove", s.requireAdmin(hime.Handler(s.removeProjectCapabilityUser)))
@@ -383,10 +393,17 @@ type pageData struct {
 	Worktrees   []bot.WorktreeInfo
 	IdleTTLDays int
 	Config      config.Snapshot
-	// Per-project config page (/config/projects/{name}).
+	// Per-project settings tabs (/config/projects/{name}[/tab]).
 	ProjectItem      config.ProjectItem
 	DiscordUserNames map[string]string // Discord user id → display name (best-effort)
-	SSEPath          string
+	ProjectTab       string            // access | workflow | integrations | danger
+	Members          []memberRow       // Access: unified allowlist + role roster
+	CapMatrix        []capMatrixRow    // Access: role → capability legend
+	CapNames         []string          // Access: legend column labels
+	// Effective role for roster members without an explicit one (safe team
+	// off → builder, on → the project's default template).
+	DefaultRoleFallback string
+	SSEPath             string
 	// Project-first shell scope: NavProject switches the sidebar into
 	// workspace mode. URL-derived only (see navScopeFromURL) so history
 	// restores can recompute it client-side.
@@ -637,35 +654,6 @@ func (s *Server) configPage(ctx *hime.Context) error {
 	return s.viewPage(ctx, "config", d)
 }
 
-func (s *Server) projectConfigPage(ctx *hime.Context) error {
-	name := ctx.PathValue("name")
-	snap := s.cfg.Snapshot()
-	var item *config.ProjectItem
-	for i := range snap.Projects {
-		if snap.Projects[i].Name == name {
-			item = &snap.Projects[i]
-			break
-		}
-	}
-	if item == nil {
-		return ctx.RedirectTo("config", map[string]string{"err": fmt.Sprintf("unknown project %q", name)})
-	}
-	d := s.basePage(ctx)
-	d.Title = item.Name + " · Config"
-	d.IsConfig = true
-	d.Config = snap
-	d.Project = item.Name
-	d.ProjectItem = *item
-	nameIDs := append([]string{}, item.AllowedUserIDs...)
-	for _, m := range item.CapabilityByUser {
-		nameIDs = append(nameIDs, m.ID)
-	}
-	d.DiscordUserNames = s.resolveDiscordUserNames(nameIDs)
-	d.Flash = ctx.FormValue("ok")
-	d.Error = ctx.FormValue("err")
-	return s.viewPage(ctx, "project_config", d)
-}
-
 // resolveDiscordUserNames maps Discord user snowflakes to display names.
 // Best-effort: durable web-users profiles, active web sessions, past thread
 // owners, then live Discord User lookup.
@@ -866,9 +854,10 @@ func (s *Server) configRedirect(ctx *hime.Context, okMsg string, err error) erro
 	return ctx.RedirectTo("config", map[string]string{"ok": okMsg})
 }
 
-// projectConfigRedirect returns project-scoped saves to that project's own
-// settings page; falls back to the config hub when the name is missing.
-func (s *Server) projectConfigRedirect(ctx *hime.Context, name, okMsg string, err error) error {
+// projectConfigTabRedirect returns a project-scoped save to one of that
+// project's settings tabs ("" = Access, the default tab); falls back to the
+// config hub when the name is missing.
+func (s *Server) projectConfigTabRedirect(ctx *hime.Context, name, tab, okMsg string, err error) error {
 	if strings.TrimSpace(name) == "" {
 		return s.configRedirect(ctx, okMsg, err)
 	}
@@ -878,7 +867,16 @@ func (s *Server) projectConfigRedirect(ctx *hime.Context, name, okMsg string, er
 	} else {
 		q.Set("ok", okMsg)
 	}
-	return ctx.Redirect("/config/projects/" + url.PathEscape(name) + "?" + q.Encode())
+	p := "/config/projects/" + url.PathEscape(name)
+	if tab != "" {
+		p += "/" + tab
+	}
+	return ctx.Redirect(p + "?" + q.Encode())
+}
+
+// projectConfigRedirect returns a project-scoped save to the Access tab.
+func (s *Server) projectConfigRedirect(ctx *hime.Context, name, okMsg string, err error) error {
+	return s.projectConfigTabRedirect(ctx, name, "", okMsg, err)
 }
 
 func (s *Server) addProject(ctx *hime.Context) error {
@@ -909,7 +907,7 @@ func (s *Server) setProjectLinear(ctx *hime.Context) error {
 	apiKey := ctx.PostFormValue("apiKey")
 	err := s.cfg.SetProjectLinear(name, enabled, teamKey, apiKey, clearKey)
 	s.auditAction(ctx, audit.ActionConfigSetLinear, err, map[string]any{"name": name, "enabled": enabled})
-	return s.projectConfigRedirect(ctx, name, fmt.Sprintf("Updated Linear for project %q", name), err)
+	return s.projectConfigTabRedirect(ctx, name, "integrations", fmt.Sprintf("Updated Linear for project %q", name), err)
 }
 
 func (s *Server) setProjectGitHub(ctx *hime.Context) error {
@@ -923,13 +921,13 @@ func (s *Server) setProjectGitHub(ctx *hime.Context) error {
 		}
 		parts := strings.SplitN(line, "/", 2)
 		if len(parts) != 2 {
-			return s.projectConfigRedirect(ctx, name, "", fmt.Errorf("invalid repo line %q (want owner/repo)", line))
+			return s.projectConfigTabRedirect(ctx, name, "integrations", "", fmt.Errorf("invalid repo line %q (want owner/repo)", line))
 		}
 		repos = append(repos, config.GitHubRepoRef{Owner: strings.TrimSpace(parts[0]), Repo: strings.TrimSpace(parts[1])})
 	}
 	err := s.cfg.SetProjectGitHubRepos(name, repos)
 	s.auditAction(ctx, "config.set_project_github", err, map[string]any{"name": name, "count": len(repos)})
-	return s.projectConfigRedirect(ctx, name, fmt.Sprintf("Updated GitHub repos for project %q", name), err)
+	return s.projectConfigTabRedirect(ctx, name, "integrations", fmt.Sprintf("Updated GitHub repos for project %q", name), err)
 }
 
 func (s *Server) setProjectChannel(ctx *hime.Context) error {
@@ -941,24 +939,24 @@ func (s *Server) setProjectChannel(ctx *hime.Context) error {
 	s.auditAction(ctx, "config.set_project_channel", err, map[string]any{
 		"name": name, "channelId": channelID, "guildId": guildID,
 	})
-	return s.projectConfigRedirect(ctx, name, fmt.Sprintf("Updated Discord settings for project %q", name), err)
+	return s.projectConfigTabRedirect(ctx, name, "integrations", fmt.Sprintf("Updated Discord settings for project %q", name), err)
 }
 
 func (s *Server) setProjectFetch(ctx *hime.Context) error {
 	name := ctx.PostFormValue("name")
 	raw := strings.TrimSpace(ctx.PostFormValue("repoFetchIntervalMinutes"))
 	if raw == "" {
-		return s.projectConfigRedirect(ctx, name, "", fmt.Errorf("repoFetchIntervalMinutes is required"))
+		return s.projectConfigTabRedirect(ctx, name, "integrations", "", fmt.Errorf("repoFetchIntervalMinutes is required"))
 	}
 	mins, err := strconv.Atoi(raw)
 	if err != nil {
-		return s.projectConfigRedirect(ctx, name, "", fmt.Errorf("repoFetchIntervalMinutes must be an integer"))
+		return s.projectConfigTabRedirect(ctx, name, "integrations", "", fmt.Errorf("repoFetchIntervalMinutes must be an integer"))
 	}
 	err = s.cfg.SetProjectRepoFetchIntervalMinutes(name, mins)
 	s.auditAction(ctx, "config.set_project_fetch", err, map[string]any{
 		"name": name, "repoFetchIntervalMinutes": mins,
 	})
-	return s.projectConfigRedirect(ctx, name, fmt.Sprintf("Updated idle repo fetch interval for project %q", name), err)
+	return s.projectConfigTabRedirect(ctx, name, "integrations", fmt.Sprintf("Updated idle repo fetch interval for project %q", name), err)
 }
 
 func (s *Server) setProjectShip(ctx *hime.Context) error {
@@ -972,24 +970,36 @@ func (s *Server) setProjectShip(ctx *hime.Context) error {
 	if enabled {
 		msg = fmt.Sprintf("Updated ship workflow for project %q (direct to primary)", name)
 	}
-	return s.projectConfigRedirect(ctx, name, msg, err)
+	return s.projectConfigTabRedirect(ctx, name, "workflow", msg, err)
 }
 
+// setProjectSafeTeam saves the Access tab's team policy: role-based (safe
+// team) on/off + the default role for members without an explicit one.
 func (s *Server) setProjectSafeTeam(ctx *hime.Context) error {
 	name := ctx.PostFormValue("name")
 	enabled := ctx.PostFormValue("safeTeamMode") == "1"
 	defaultTpl := ctx.PostFormValue("safeTeamDefaultTemplate")
-	defaultMode := ctx.PostFormValue("defaultMode")
-	err := s.cfg.SetProjectSafeTeam(name, enabled, defaultTpl, defaultMode)
+	err := s.cfg.SetProjectSafeTeamPolicy(name, enabled, defaultTpl)
 	s.auditAction(ctx, "config.set_project_safe_team", err, map[string]any{
 		"name": name, "safeTeamMode": enabled,
-		"safeTeamDefaultTemplate": defaultTpl, "defaultMode": defaultMode,
+		"safeTeamDefaultTemplate": defaultTpl,
 	})
-	msg := fmt.Sprintf("Updated safe team settings for project %q", name)
+	msg := fmt.Sprintf("Team policy for project %q: trusted — members without a role act as builder", name)
 	if enabled {
-		msg = fmt.Sprintf("Safe team mode ON for project %q — unmapped members use the default template", name)
+		msg = fmt.Sprintf("Team policy for project %q: role-based — members without a role use the default role", name)
 	}
 	return s.projectConfigRedirect(ctx, name, msg, err)
+}
+
+// setProjectMode saves the Workflow tab's default mode for new sessions.
+func (s *Server) setProjectMode(ctx *hime.Context) error {
+	name := ctx.PostFormValue("name")
+	mode := ctx.PostFormValue("defaultMode")
+	err := s.cfg.SetProjectDefaultMode(name, mode)
+	s.auditAction(ctx, "config.set_project_mode", err, map[string]any{
+		"name": name, "defaultMode": mode,
+	})
+	return s.projectConfigTabRedirect(ctx, name, "workflow", fmt.Sprintf("Updated default mode for project %q", name), err)
 }
 
 func (s *Server) setProjectVerify(ctx *hime.Context) error {
@@ -997,7 +1007,7 @@ func (s *Server) setProjectVerify(ctx *hime.Context) error {
 	raw := ctx.PostFormValue("verifyCommands")
 	cmds, err := config.ParseVerifyCommandsText(raw)
 	if err != nil {
-		return s.projectConfigRedirect(ctx, name, "", err)
+		return s.projectConfigTabRedirect(ctx, name, "workflow", "", err)
 	}
 	err = s.cfg.SetProjectVerifyCommands(name, cmds)
 	s.auditAction(ctx, "config.set_project_verify", err, map[string]any{
@@ -1009,9 +1019,11 @@ func (s *Server) setProjectVerify(ctx *hime.Context) error {
 	} else if len(cmds) > 1 {
 		msg = fmt.Sprintf("Saved %d verify commands for project %q", len(cmds), name)
 	}
-	return s.projectConfigRedirect(ctx, name, msg, err)
+	return s.projectConfigTabRedirect(ctx, name, "workflow", msg, err)
 }
 
+// setProjectCapabilityUser saves a roster role select: an explicit template,
+// or empty to reset the user to the policy's default fallback.
 func (s *Server) setProjectCapabilityUser(ctx *hime.Context) error {
 	name := ctx.PostFormValue("name")
 	id := ctx.PostFormValue("id")
@@ -1020,7 +1032,11 @@ func (s *Server) setProjectCapabilityUser(ctx *hime.Context) error {
 	s.auditAction(ctx, "config.set_project_capability_user", err, map[string]any{
 		"name": name, "id": id, "template": tpl,
 	})
-	return s.projectConfigRedirect(ctx, name, fmt.Sprintf("Mapped user %s → %s", id, tpl), err)
+	msg := fmt.Sprintf("Reset user %s to the default role", id)
+	if strings.TrimSpace(tpl) != "" {
+		msg = fmt.Sprintf("Set role %s for user %s", tpl, id)
+	}
+	return s.projectConfigRedirect(ctx, name, msg, err)
 }
 
 func (s *Server) removeProjectCapabilityUser(ctx *hime.Context) error {
@@ -1041,7 +1057,11 @@ func (s *Server) setProjectCapabilityRole(ctx *hime.Context) error {
 	s.auditAction(ctx, "config.set_project_capability_role", err, map[string]any{
 		"name": name, "id": id, "template": tpl,
 	})
-	return s.projectConfigRedirect(ctx, name, fmt.Sprintf("Mapped role %s → %s", id, tpl), err)
+	msg := fmt.Sprintf("Reset Discord role %s to the default role", id)
+	if strings.TrimSpace(tpl) != "" {
+		msg = fmt.Sprintf("Set role %s for Discord role %s", tpl, id)
+	}
+	return s.projectConfigRedirect(ctx, name, msg, err)
 }
 
 func (s *Server) removeProjectCapabilityRole(ctx *hime.Context) error {
@@ -1073,6 +1093,11 @@ func (s *Server) removeProjectUser(ctx *hime.Context) error {
 	name := ctx.PostFormValue("name")
 	id := ctx.PostFormValue("id")
 	err := s.cfg.RemoveProjectAllowedUser(name, id)
+	if err == nil {
+		// Drop the explicit role too so the roster loses the whole member
+		// (no inert capability map left behind).
+		err = s.cfg.RemoveProjectCapabilityByUser(name, id)
+	}
 	s.auditAction(ctx, audit.ActionConfigRemoveUser, err, map[string]any{"project": name, "id": id})
 	return s.projectConfigRedirect(ctx, name, fmt.Sprintf("Removed user %s", id), err)
 }
@@ -1089,8 +1114,43 @@ func (s *Server) removeProjectRole(ctx *hime.Context) error {
 	name := ctx.PostFormValue("name")
 	id := ctx.PostFormValue("id")
 	err := s.cfg.RemoveProjectAllowedRole(name, id)
+	if err == nil {
+		err = s.cfg.RemoveProjectCapabilityByRole(name, id)
+	}
 	s.auditAction(ctx, audit.ActionConfigRemoveRole, err, map[string]any{"project": name, "id": id})
 	return s.projectConfigRedirect(ctx, name, fmt.Sprintf("Removed role %s", id), err)
+}
+
+// addProjectMember adds one roster principal in a single post: allowlist
+// entry plus an optional explicit role (capability template).
+func (s *Server) addProjectMember(ctx *hime.Context) error {
+	name := ctx.PostFormValue("name")
+	kind := ctx.PostFormValue("kind")
+	id := ctx.PostFormValue("id")
+	tpl := strings.TrimSpace(ctx.PostFormValue("template"))
+	var err error
+	switch kind {
+	case "user":
+		err = s.cfg.AddProjectAllowedUser(name, id)
+		if err == nil && tpl != "" {
+			err = s.cfg.SetProjectCapabilityByUser(name, id, tpl)
+		}
+	case "role":
+		err = s.cfg.AddProjectAllowedRole(name, id)
+		if err == nil && tpl != "" {
+			err = s.cfg.SetProjectCapabilityByRole(name, id, tpl)
+		}
+	default:
+		err = fmt.Errorf("kind must be user or role")
+	}
+	s.auditAction(ctx, "config.add_project_member", err, map[string]any{
+		"project": name, "kind": kind, "id": id, "template": tpl,
+	})
+	msg := fmt.Sprintf("Added %s %s", kind, id)
+	if tpl != "" {
+		msg = fmt.Sprintf("Added %s %s as %s", kind, id, tpl)
+	}
+	return s.projectConfigRedirect(ctx, name, msg, err)
 }
 
 func (s *Server) addChannel(ctx *hime.Context) error {
@@ -1101,7 +1161,7 @@ func (s *Server) addChannel(ctx *hime.Context) error {
 	msg := fmt.Sprintf("Mapped channel %s → %s", channelID, project)
 	// Channel forms live on both the config hub and project settings pages.
 	if ctx.PostFormValue("return_to") == "project" {
-		return s.projectConfigRedirect(ctx, project, msg, err)
+		return s.projectConfigTabRedirect(ctx, project, "integrations", msg, err)
 	}
 	return s.configRedirect(ctx, msg, err)
 }
@@ -1112,7 +1172,7 @@ func (s *Server) removeChannel(ctx *hime.Context) error {
 	s.auditAction(ctx, audit.ActionConfigRemoveChannel, err, map[string]any{"channelId": channelID})
 	msg := fmt.Sprintf("Removed channel %s", channelID)
 	if ctx.PostFormValue("return_to") == "project" {
-		return s.projectConfigRedirect(ctx, ctx.PostFormValue("project"), msg, err)
+		return s.projectConfigTabRedirect(ctx, ctx.PostFormValue("project"), "integrations", msg, err)
 	}
 	return s.configRedirect(ctx, msg, err)
 }

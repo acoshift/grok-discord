@@ -464,7 +464,11 @@ func TestAuthOnMemberCannotViewConfig(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, path := range []string{"/config", "/config/projects/proj", "/partials/config/lists"} {
+		for _, path := range []string{
+			"/config", "/config/projects/proj", "/config/projects/proj/workflow",
+			"/config/projects/proj/integrations", "/config/projects/proj/danger",
+			"/partials/config/lists",
+		} {
 			req := httptest.NewRequest(http.MethodGet, path, nil)
 			req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sid})
 			w := httptest.NewRecorder()

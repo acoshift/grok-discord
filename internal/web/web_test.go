@@ -157,19 +157,28 @@ func TestPagesRender(t *testing.T) {
 		{"/config", "424242424242424242"},
 		{"/config", "Default Discord guild"},
 		{"/config", `href="/config/projects/proj"`},
-		// Per-project settings page owns GitHub/Discord/Linear forms.
+		// Per-project settings: four sub-tab pages (Access is the default).
 		{"/config/projects/proj", `id="page-project-config"`},
-		{"/config/projects/proj", "Discord guild ID"},
-		{"/config/projects/proj", "name=\"guildId\""},
-		{"/config/projects/proj", "GitHub repositories"},
-		{"/config/projects/proj", "LINEAR_API_KEY_PROJ"},
-		{"/config/projects/proj", "Safe team mode"},
-		{"/config/projects/proj", `id="project-safe-team"`},
+		{"/config/projects/proj", `id="project-config-tabs"`},
+		{"/config/projects/proj", "Team policy"},
 		{"/config/projects/proj", "name=\"safeTeamMode\""},
-		{"/config/projects/proj", "Verify commands"},
-		{"/config/projects/proj", `id="project-verify"`},
-		{"/config/projects/proj", "name=\"verifyCommands\""},
-		{"/config/projects/proj", "Danger zone"},
+		{"/config/projects/proj", `id="project-members"`},
+		{"/config/projects/proj", `href="/config/projects/proj/workflow"`},
+		{"/config/projects/proj", `href="/config/projects/proj/integrations"`},
+		{"/config/projects/proj", `href="/config/projects/proj/danger"`},
+		{"/config/projects/proj/workflow", `id="page-project-config-workflow"`},
+		{"/config/projects/proj/workflow", "Shipping"},
+		{"/config/projects/proj/workflow", "name=\"directToPrimary\""},
+		{"/config/projects/proj/workflow", "name=\"defaultMode\""},
+		{"/config/projects/proj/workflow", "Verify commands"},
+		{"/config/projects/proj/workflow", "name=\"verifyCommands\""},
+		{"/config/projects/proj/integrations", `id="page-project-config-integrations"`},
+		{"/config/projects/proj/integrations", "Discord guild ID"},
+		{"/config/projects/proj/integrations", "name=\"guildId\""},
+		{"/config/projects/proj/integrations", "GitHub repositories"},
+		{"/config/projects/proj/integrations", "LINEAR_API_KEY_PROJ"},
+		{"/config/projects/proj/danger", `id="page-project-config-danger"`},
+		{"/config/projects/proj/danger", "Remove project"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.path, func(t *testing.T) {
@@ -1343,7 +1352,7 @@ func TestProjectConfigPage(t *testing.T) {
 		t.Fatalf("unknown project Location=%q", loc)
 	}
 
-	// Save repos → back to the project page with flash.
+	// Save repos → back to the project's Integrations tab with flash.
 	form := url.Values{"name": {"proj"}, "repos": {"acme/app\nacme/api"}}
 	req = httptest.NewRequest(http.MethodPost, "/config/projects/github", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -1352,17 +1361,17 @@ func TestProjectConfigPage(t *testing.T) {
 	if w.Code != http.StatusSeeOther && w.Code != http.StatusFound {
 		t.Fatalf("set repos status=%d body=%s", w.Code, w.Body.String())
 	}
-	if loc := w.Header().Get("Location"); !strings.HasPrefix(loc, "/config/projects/proj?") || !strings.Contains(loc, "ok=") {
+	if loc := w.Header().Get("Location"); !strings.HasPrefix(loc, "/config/projects/proj/integrations?") || !strings.Contains(loc, "ok=") {
 		t.Fatalf("set repos Location=%q", loc)
 	}
 
-	// Channel map from the project page round-trips with return_to=project.
+	// Channel map from the project page round-trips to Integrations.
 	form = url.Values{"channelId": {"ch-proj-2"}, "project": {"proj"}, "return_to": {"project"}}
 	req = httptest.NewRequest(http.MethodPost, "/config/channels", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w = httptest.NewRecorder()
 	h.ServeHTTP(w, req)
-	if loc := w.Header().Get("Location"); !strings.HasPrefix(loc, "/config/projects/proj?") {
+	if loc := w.Header().Get("Location"); !strings.HasPrefix(loc, "/config/projects/proj/integrations?") {
 		t.Fatalf("add channel Location=%q", loc)
 	}
 	if p, ok := cfg.ChannelProject("ch-proj-2"); !ok || p != "proj" {
@@ -1382,12 +1391,11 @@ func TestProjectConfigPage(t *testing.T) {
 		t.Fatalf("fetch interval=%d", cfg.ProjectRepoFetchIntervalMinutes("proj"))
 	}
 
-	// Safe team mode + defaultMode.
+	// Team policy (safe team) posts alone from the Access tab.
 	form = url.Values{
-		"name":                     {"proj"},
-		"safeTeamMode":             {"1"},
-		"safeTeamDefaultTemplate":  {"investigator"},
-		"defaultMode":              {"case"},
+		"name":                    {"proj"},
+		"safeTeamMode":            {"1"},
+		"safeTeamDefaultTemplate": {"investigator"},
 	}
 	req = httptest.NewRequest(http.MethodPost, "/config/projects/safe-team", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -1396,8 +1404,24 @@ func TestProjectConfigPage(t *testing.T) {
 	if w.Code != http.StatusSeeOther && w.Code != http.StatusFound {
 		t.Fatalf("set safe-team status=%d body=%s", w.Code, w.Body.String())
 	}
+	if loc := w.Header().Get("Location"); !strings.HasPrefix(loc, "/config/projects/proj?") {
+		t.Fatalf("set safe-team Location=%q", loc)
+	}
 	if !cfg.SafeTeamMode("proj") {
 		t.Fatal("SafeTeamMode not set")
+	}
+
+	// Default mode posts separately from the Workflow tab.
+	form = url.Values{"name": {"proj"}, "defaultMode": {"case"}}
+	req = httptest.NewRequest(http.MethodPost, "/config/projects/mode", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusSeeOther && w.Code != http.StatusFound {
+		t.Fatalf("set mode status=%d body=%s", w.Code, w.Body.String())
+	}
+	if loc := w.Header().Get("Location"); !strings.HasPrefix(loc, "/config/projects/proj/workflow?") {
+		t.Fatalf("set mode Location=%q", loc)
 	}
 	if cfg.ProjectDefaultMode("proj") != "case" {
 		t.Fatalf("defaultMode=%q", cfg.ProjectDefaultMode("proj"))
@@ -1434,33 +1458,138 @@ func TestProjectConfigPage(t *testing.T) {
 		t.Fatalf("verify cmds: %+v", vc)
 	}
 
-	// Project page renders the saved state.
-	req = httptest.NewRequest(http.MethodGet, "/config/projects/proj", nil)
+	// Each tab renders its slice of the saved state.
+	pages := []struct {
+		path  string
+		wants []string
+	}{
+		{"/config/projects/proj", []string{
+			`id="page-project-config"`,
+			`id="project-policy"`,
+			`name="safeTeamMode"`,
+			"checked",
+			`id="member-roster"`,
+			"u-builder",
+			"builder",
+			"not on member list", // capability map without allowlist → inert row
+		}},
+		{"/config/projects/proj/workflow", []string{
+			`id="page-project-config-workflow"`,
+			`name="directToPrimary"`,
+			`id="project-verify"`,
+			"go test ./...",
+			"make lint",
+		}},
+		{"/config/projects/proj/integrations", []string{
+			`id="page-project-config-integrations"`,
+			"acme/app",
+			"ch-proj-2",
+			`name="return_to"`,
+			`name="repoFetchIntervalMinutes"`,
+			`value="15"`,
+		}},
+		{"/config/projects/proj/danger", []string{
+			`id="page-project-config-danger"`,
+			"Remove project",
+		}},
+	}
+	for _, pg := range pages {
+		req = httptest.NewRequest(http.MethodGet, pg.path, nil)
+		w = httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s status=%d", pg.path, w.Code)
+		}
+		body := w.Body.String()
+		for _, want := range pg.wants {
+			if !strings.Contains(body, want) {
+				t.Fatalf("%s missing %q", pg.path, want)
+			}
+		}
+	}
+}
+
+func TestProjectMemberRoster(t *testing.T) {
+	srv, cfg, _ := testServer(t)
+	h := srv.Handler()
+
+	// Add member with an explicit role in one post: allowlist + capability map.
+	form := url.Values{"name": {"proj"}, "kind": {"user"}, "id": {"u-new"}, "template": {"builder"}}
+	req := httptest.NewRequest(http.MethodPost, "/config/projects/members", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusSeeOther && w.Code != http.StatusFound {
+		t.Fatalf("add member status=%d body=%s", w.Code, w.Body.String())
+	}
+	if loc := w.Header().Get("Location"); !strings.HasPrefix(loc, "/config/projects/proj?") || !strings.Contains(loc, "ok=") {
+		t.Fatalf("add member Location=%q", loc)
+	}
+	if !cfg.AccessAllowed("proj", "u-new", nil) {
+		t.Fatal("added member not allowlisted")
+	}
+	if !cfg.ResolveCapabilities("proj", "u-new", nil).CanShip() {
+		t.Fatal("added member missing builder template")
+	}
+
+	// Role added without a template stays on the default fallback.
+	form = url.Values{"name": {"proj"}, "kind": {"role"}, "id": {"r-eng"}, "template": {""}}
+	req = httptest.NewRequest(http.MethodPost, "/config/projects/members", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w = httptest.NewRecorder()
 	h.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("project page status=%d", w.Code)
+	if w.Code != http.StatusSeeOther && w.Code != http.StatusFound {
+		t.Fatalf("add role status=%d", w.Code)
 	}
-	body := w.Body.String()
-	for _, want := range []string{
-		`id="page-project-config"`,
-		"acme/app",
-		"ch-proj-2",
-		`name="return_to"`,
-		"Remove project",
-		`name="repoFetchIntervalMinutes"`,
-		`value="15"`,
-		`id="project-safe-team"`,
-		`name="safeTeamMode"`,
-		"checked",
-		"u-builder",
-		"builder",
-		`id="project-verify"`,
-		"go test ./...",
-		"make lint",
-	} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("project page missing %q", want)
+	if !cfg.AccessAllowed("proj", "x", []string{"r-eng"}) {
+		t.Fatal("added role not allowlisted")
+	}
+
+	// Roster role select posting an empty template resets to default.
+	form = url.Values{"name": {"proj"}, "id": {"u-new"}, "template": {""}}
+	req = httptest.NewRequest(http.MethodPost, "/config/projects/capabilities/users", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusSeeOther && w.Code != http.StatusFound {
+		t.Fatalf("reset role status=%d", w.Code)
+	}
+	snap := cfg.Snapshot()
+	for _, p := range snap.Projects {
+		if p.Name != "proj" {
+			continue
+		}
+		for _, m := range p.CapabilityByUser {
+			if m.ID == "u-new" {
+				t.Fatalf("capability map for u-new not cleared: %+v", m)
+			}
+		}
+	}
+
+	// Removing a member also drops any explicit role (no inert map left).
+	if err := cfg.SetProjectCapabilityByUser("proj", "u-new", "approver"); err != nil {
+		t.Fatal(err)
+	}
+	form = url.Values{"name": {"proj"}, "id": {"u-new"}}
+	req = httptest.NewRequest(http.MethodPost, "/config/projects/users/remove", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusSeeOther && w.Code != http.StatusFound {
+		t.Fatalf("remove member status=%d", w.Code)
+	}
+	if cfg.AccessAllowed("proj", "u-new", nil) {
+		t.Fatal("removed member still allowlisted")
+	}
+	snap = cfg.Snapshot()
+	for _, p := range snap.Projects {
+		if p.Name != "proj" {
+			continue
+		}
+		for _, m := range p.CapabilityByUser {
+			if m.ID == "u-new" {
+				t.Fatalf("capability map for removed member kept: %+v", m)
+			}
 		}
 	}
 }

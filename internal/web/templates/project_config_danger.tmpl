@@ -1,0 +1,18 @@
+{{define "content"}}
+<div id="page-project-config-danger">
+{{template "project_config_header" $}}
+
+<div class="section card danger-zone" id="project-danger">
+  <h2>Remove project</h2>
+  <p class="sub" style="margin-top:0">
+    Removing the project also removes its channel mappings. Existing worktrees,
+    sessions, and history are not touched.
+  </p>
+  <form method="post" action="{{route "config.removeProject"}}" onsubmit="return confirm('Remove project {{.ProjectItem.Name}}? Channel maps to this project will also be removed.');">
+    {{template "csrf" $}}
+    <input type="hidden" name="name" value="{{.ProjectItem.Name}}">
+    <button type="submit" class="btn-danger">Remove project</button>
+  </form>
+</div>
+</div>
+{{end}}

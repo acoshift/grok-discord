@@ -523,6 +523,65 @@ func (c *Config) SetProjectSafeTeam(name string, enabled bool, defaultTemplate, 
 	return c.saveLocked()
 }
 
+// SetProjectSafeTeamPolicy sets SafeTeamMode and the unmapped default template
+// without touching DefaultMode (the web Access tab posts policy alone).
+// enabled=false clears SafeTeamMode (legacy builder default for unmapped).
+// defaultTemplate empty → "investigator".
+func (c *Config) SetProjectSafeTeamPolicy(name string, enabled bool, defaultTemplate string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("project name is required")
+	}
+	defaultTemplate = strings.TrimSpace(strings.ToLower(defaultTemplate))
+	if defaultTemplate == "" {
+		defaultTemplate = "investigator"
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	pc, ok := c.Projects[name]
+	if !ok {
+		return fmt.Errorf("project %q not found", name)
+	}
+	if _, ok := lookupTemplate(defaultTemplate, pc.CapabilityTemplates); !ok {
+		return fmt.Errorf("unknown capability template %q", defaultTemplate)
+	}
+	if enabled {
+		v := true
+		pc.SafeTeamMode = &v
+	} else {
+		pc.SafeTeamMode = nil
+	}
+	if defaultTemplate == "investigator" {
+		pc.SafeTeamDefaultTemplate = ""
+	} else {
+		pc.SafeTeamDefaultTemplate = defaultTemplate
+	}
+	c.Projects[name] = pc
+	return c.saveLocked()
+}
+
+// SetProjectDefaultMode sets projects.*.defaultMode alone (the web Workflow
+// tab posts it apart from safe-team policy). Must be empty or a known mode.
+func (c *Config) SetProjectDefaultMode(name, defaultMode string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("project name is required")
+	}
+	defaultMode = strings.TrimSpace(strings.ToLower(defaultMode))
+	if !ValidDefaultModes[defaultMode] {
+		return fmt.Errorf("defaultMode must be empty, investigate, fix, explain, or case")
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	pc, ok := c.Projects[name]
+	if !ok {
+		return fmt.Errorf("project %q not found", name)
+	}
+	pc.DefaultMode = defaultMode
+	c.Projects[name] = pc
+	return c.saveLocked()
+}
+
 // SetProjectCapabilityByUser sets or clears a user → template map entry.
 // template empty removes the mapping.
 func (c *Config) SetProjectCapabilityByUser(name, userID, template string) error {

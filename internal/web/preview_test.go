@@ -42,14 +42,24 @@ func TestPreviewServer(t *testing.T) {
 		}
 		return p
 	}
+	safeOn := true
 	cfg := &config.Config{
 		DiscordToken:    "tok",
 		DiscordClientID: "424242424242424242",
 		Projects: config.ProjectsMap{
+			// webapp exercises the full Access roster: safe team on, explicit
+			// user/role templates, an unmapped member on the default fallback,
+			// and an inert capability map (no allowlist entry).
 			"webapp": {
 				Path:           mkProj("webapp"),
 				AllowedUserIDs: []string{"111111111111111111", "222222222222222222"},
 				AllowedRoleIDs: []string{"333333333333333333"},
+				SafeTeamMode:   &safeOn,
+				CapabilityByUser: map[string]string{
+					"111111111111111111": "admin",
+					"444444444444444444": "approver",
+				},
+				CapabilityByRole: map[string]string{"333333333333333333": "builder"},
 			},
 			"api": {
 				Path:           mkProj("api"),

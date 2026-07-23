@@ -1,441 +1,165 @@
 {{define "content"}}
-<p class="sub" style="margin-bottom:0.5rem"><a href="{{route "config"}}">← Config</a></p>
-<h1 id="page-project-config"><span class="mono">{{.ProjectItem.Name}}</span> <span class="muted" style="font-weight:500;font-size:1.05rem">· project settings</span></h1>
-<p class="sub">
-  <span class="mono">{{.ProjectItem.Path}}</span>
-  {{if .ProjectItem.LinearEnabled}} · <a href="/projects/{{.ProjectItem.Name}}/linear">Linear</a>{{end}}
-</p>
-{{if .Flash}}<div class="flash">{{.Flash}}</div>{{end}}
-{{if .Error}}<div class="flash err">{{.Error}}</div>{{end}}
+<div id="page-project-config">
+{{template "project_config_header" $}}
 
-<div class="section card" id="project-github">
-  <h2>GitHub repositories</h2>
+<div class="section card" id="project-policy">
+  <h2>Team policy</h2>
   <p class="sub" style="margin-top:0">
-    Multi-repo catalog for issues, commits, and PR tracking — one <span class="mono">owner/repo</span> per line.
-    Leave blank to discover from the checkout’s git remotes.
-  </p>
-  <form method="post" action="{{route "config.setProjectGitHub"}}">
-    {{template "csrf" $}}
-    <input type="hidden" name="name" value="{{.ProjectItem.Name}}">
-    <label for="project-repos">Repos</label>
-    <textarea id="project-repos" name="repos" rows="4" placeholder="acme/app&#10;acme/api">{{.ProjectItem.GitHubReposText}}</textarea>
-    <div class="form-actions"><button type="submit">Save repos</button></div>
-  </form>
-</div>
-
-<div class="section card" id="project-ship">
-  <h2>Ship workflow</h2>
-  <p class="sub" style="margin-top:0">
-    Default is pull-request mode: each session works on a managed branch and opens a PR.
-    <strong>Direct to primary</strong> keeps per-session worktrees, then the bot fast-forwards
-    the project default branch and pushes — no PR. For solo / fast-moving trusted projects only.
-    Existing threads keep their ship mode until a new thread is started.
-  </p>
-  <form method="post" action="{{route "config.setProjectShip"}}">
-    {{template "csrf" $}}
-    <input type="hidden" name="name" value="{{.ProjectItem.Name}}">
-    <label class="check">
-      <input type="checkbox" name="directToPrimary" value="1" {{if .ProjectItem.DirectToPrimary}}checked{{end}}>
-      Direct to primary (no pull requests)
-    </label>
-    <div class="form-actions"><button type="submit">Save ship workflow</button></div>
-  </form>
-</div>
-
-<div class="section card" id="project-safe-team">
-  <h2>Safe team mode</h2>
-  <p class="sub" style="margin-top:0">
-    When <strong>Safe team mode</strong> is on, Discord members get capabilities from templates
-    (<span class="mono">investigator</span>, <span class="mono">builder</span>, …) instead of
-    everyone acting as a full builder. Unmapped allowlisted users/roles fall back to the
-    <strong>default template</strong> (normally investigator — no PRs / no ship).
-    <strong>Map eng roles to <span class="mono">builder</span> before enabling</strong>, or
-    engineers will be demoted immediately (including already-queued tasks).
+    What Grok does for members without an explicit role. Explicit roles on the
+    roster below always apply. Changes save immediately, including for
+    already-queued tasks.
   </p>
   <form method="post" action="{{route "config.setProjectSafeTeam"}}">
     {{template "csrf" $}}
     <input type="hidden" name="name" value="{{.ProjectItem.Name}}">
-    <label class="check" style="margin-bottom:0.75rem;">
-      <input type="checkbox" name="safeTeamMode" value="1" {{if .ProjectItem.SafeTeamMode}}checked{{end}}>
-      Enable safe team mode (capability templates)
-    </label>
-    <div class="inline" style="grid-template-columns: 1fr 1fr; margin-bottom:0.65rem;">
-      <div>
-        <label for="safe-team-default-tpl">Default template (unmapped)</label>
-        <select id="safe-team-default-tpl" name="safeTeamDefaultTemplate">
-          {{$curTpl := .ProjectItem.SafeTeamDefaultTemplate}}
-          {{range .ProjectItem.CapabilityTemplateNames}}
-          <option value="{{.}}" {{if eq . $curTpl}}selected{{end}}>{{.}}</option>
-          {{end}}
-        </select>
-      </div>
-      <div>
-        <label for="project-default-mode">Default mode (new sessions)</label>
-        <select id="project-default-mode" name="defaultMode">
-          {{$curMode := .ProjectItem.DefaultMode}}
-          <option value="" {{if eq $curMode ""}}selected{{end}}>(legacy fix)</option>
-          <option value="case" {{if eq $curMode "case"}}selected{{end}}>case (support)</option>
-          <option value="investigate" {{if eq $curMode "investigate"}}selected{{end}}>investigate</option>
-          <option value="fix" {{if eq $curMode "fix"}}selected{{end}}>fix</option>
-          <option value="explain" {{if eq $curMode "explain"}}selected{{end}}>explain</option>
-        </select>
-      </div>
+    <div class="choice-row">
+      <label class="choice">
+        <input type="radio" name="safeTeamMode" value="0" {{if not .ProjectItem.SafeTeamMode}}checked{{end}} data-autosubmit>
+        <span class="dot"></span>
+        <span class="t">Trusted team <span class="flag ok">simple</span></span>
+        <span class="d">Members without a role act as <span class="mono">builder</span> — investigate, run sessions, push &amp; open PRs.</span>
+      </label>
+      <label class="choice">
+        <input type="radio" name="safeTeamMode" value="1" {{if .ProjectItem.SafeTeamMode}}checked{{end}} data-autosubmit>
+        <span class="dot"></span>
+        <span class="t">Role-based <span class="flag warn">safe team</span></span>
+        <span class="d">Members without a role fall back to the default role below — normally <span class="mono">investigator</span> (no PRs / no ship).</span>
+      </label>
     </div>
-    <p class="sub" style="margin:0 0 0.65rem">
-      Support channels usually want <span class="mono">defaultMode=case</span> so freeform
-      messages stay on the case lifecycle. Eng channels leave it empty (fix).
-    </p>
-    <div class="form-actions"><button type="submit">Save safe team</button></div>
-  </form>
-
-  {{if .ProjectItem.SafeTeamMode}}
-  {{if or .ProjectItem.UnmappedUserIDs .ProjectItem.UnmappedRoleIDs}}
-  <div class="flash err" style="margin-top:1rem;margin-bottom:0;">
-    <strong>Unmapped members</strong> fall back to
-    <span class="mono">{{.ProjectItem.SafeTeamDefaultTemplate}}</span>.
-    Map eng users/roles to <span class="mono">builder</span> (or higher) so they can ship.
-    {{if .ProjectItem.UnmappedUserIDs}}
-    <div style="margin-top:0.4rem">Users:
-      {{range $i, $id := .ProjectItem.UnmappedUserIDs}}{{if $i}}, {{end}}<span class="mono">{{$id}}</span>{{end}}
-    </div>
-    {{end}}
-    {{if .ProjectItem.UnmappedRoleIDs}}
-    <div style="margin-top:0.25rem">Roles:
-      {{range $i, $id := .ProjectItem.UnmappedRoleIDs}}{{if $i}}, {{end}}<span class="mono">{{$id}}</span>{{end}}
-    </div>
-    {{end}}
-  </div>
-  {{end}}
-  {{end}}
-
-  <div style="border-top:1px solid var(--border); margin-top:1.1rem; padding-top:1rem;">
-    <h2>Capability maps</h2>
-    <p class="sub" style="margin-top:0">
-      Map Discord user/role IDs to templates. Built-ins:
-      <span class="mono">investigator</span> (read-only + case),
-      <span class="mono">operator</span> (investigate + customer draft),
-      <span class="mono">builder</span> (fix + PR),
-      <span class="mono">approver</span>,
-      <span class="mono">admin</span>.
-    </p>
-
-    <form class="inline" method="post" action="{{route "config.setProjectCapabilityUser"}}" style="grid-template-columns: 1fr 10rem auto; margin-bottom:0.65rem;">
-      {{template "csrf" $}}
-      <input type="hidden" name="name" value="{{.ProjectItem.Name}}">
-      <div>
-        <label for="cap-user-id">User ID → template</label>
-        <input id="cap-user-id" type="text" name="id" placeholder="Discord user snowflake" required autocomplete="off">
-      </div>
-      <div>
-        <label for="cap-user-tpl">Template</label>
-        <select id="cap-user-tpl" name="template" required>
-          {{range .ProjectItem.CapabilityTemplateNames}}
-          <option value="{{.}}">{{.}}</option>
-          {{end}}
-        </select>
-      </div>
-      <button type="submit">Map user</button>
-    </form>
-    {{if .ProjectItem.CapabilityByUser}}
-    <div class="table-scroll" style="margin-bottom:1rem;">
-    <table>
-      <thead><tr><th>User</th><th>Template</th><th></th></tr></thead>
-      <tbody>
-        {{range .ProjectItem.CapabilityByUser}}
-        <tr>
-          <td>
-            <span class="mono">{{.ID}}</span>{{with index $.DiscordUserNames .ID}} <span class="muted">{{.}}</span>{{end}}
-          </td>
-          <td class="mono">{{.Template}}</td>
-          <td class="row-actions">
-            <form method="post" action="{{route "config.removeProjectCapabilityUser"}}" onsubmit="return confirm('Remove capability map for user {{.ID}}?');">
-              {{template "csrf" $}}
-              <input type="hidden" name="name" value="{{$.ProjectItem.Name}}">
-              <input type="hidden" name="id" value="{{.ID}}">
-              <button type="submit" class="btn-danger">Remove</button>
-            </form>
-          </td>
-        </tr>
-        {{end}}
-      </tbody>
-    </table>
-    </div>
-    {{else}}
-    <div class="empty" style="margin-bottom:1rem;">No user capability maps.</div>
-    {{end}}
-
-    <form class="inline" method="post" action="{{route "config.setProjectCapabilityRole"}}" style="grid-template-columns: 1fr 10rem auto; margin-bottom:0.65rem;">
-      {{template "csrf" $}}
-      <input type="hidden" name="name" value="{{.ProjectItem.Name}}">
-      <div>
-        <label for="cap-role-id">Role ID → template</label>
-        <input id="cap-role-id" type="text" name="id" placeholder="Discord role snowflake" required autocomplete="off">
-      </div>
-      <div>
-        <label for="cap-role-tpl">Template</label>
-        <select id="cap-role-tpl" name="template" required>
-          {{range .ProjectItem.CapabilityTemplateNames}}
-          <option value="{{.}}">{{.}}</option>
-          {{end}}
-        </select>
-      </div>
-      <button type="submit">Map role</button>
-    </form>
-    {{if .ProjectItem.CapabilityByRole}}
-    <div class="table-scroll">
-    <table>
-      <thead><tr><th>Role ID</th><th>Template</th><th></th></tr></thead>
-      <tbody>
-        {{range .ProjectItem.CapabilityByRole}}
-        <tr>
-          <td class="mono">{{.ID}}</td>
-          <td class="mono">{{.Template}}</td>
-          <td class="row-actions">
-            <form method="post" action="{{route "config.removeProjectCapabilityRole"}}" onsubmit="return confirm('Remove capability map for role {{.ID}}?');">
-              {{template "csrf" $}}
-              <input type="hidden" name="name" value="{{$.ProjectItem.Name}}">
-              <input type="hidden" name="id" value="{{.ID}}">
-              <button type="submit" class="btn-danger">Remove</button>
-            </form>
-          </td>
-        </tr>
-        {{end}}
-      </tbody>
-    </table>
-    </div>
-    {{else}}
-    <div class="empty">No role capability maps.</div>
-    {{end}}
-  </div>
-</div>
-
-<div class="section card" id="project-verify">
-  <h2>Verify commands</h2>
-  <p class="sub" style="margin-top:0">
-    Shell checks run by <span class="mono">@Grok /verify</span> in a thread (no Grok model call).
-    Commands run with the session worktree as cwd (or main checkout if none).
-    One command per line: <span class="mono">name | command</span>
-    or <span class="mono">name | command | timeoutMs</span> (timeout optional; default 10 minutes).
-    Also accepts <span class="mono">name: command</span>. Lines starting with <span class="mono">#</span> are ignored.
-    Empty saves clears all verify commands.
-  </p>
-  <form method="post" action="{{route "config.setProjectVerify"}}">
-    {{template "csrf" $}}
-    <input type="hidden" name="name" value="{{.ProjectItem.Name}}">
-    <label for="project-verify-cmds">Commands</label>
-    <textarea id="project-verify-cmds" name="verifyCommands" rows="5" placeholder="unit | go test ./...&#10;lint | make lint | 300000" spellcheck="false">{{.ProjectItem.VerifyCommandsText}}</textarea>
-    <div class="form-actions"><button type="submit">Save verify commands</button></div>
-  </form>
-</div>
-
-<div class="section card" id="project-repo-fetch">
-  <h2>Idle repo fetch</h2>
-  <p class="sub" style="margin-top:0">
-    While the bot is running, periodically run <span class="mono">git fetch --all --prune</span> on this project’s
-    main checkout so Commits / remote-tracking refs stay fresh.
-    Default is <span class="mono">5</span> minutes when unset. <span class="mono">0</span> disables idle fetch.
-    Creating a new worktree always fetches with a short hardcoded throttle (5s), independent of this setting.
-  </p>
-  <form class="inline" method="post" action="{{route "config.setProjectFetch"}}" style="grid-template-columns: 12rem auto;">
-    {{template "csrf" $}}
-    <input type="hidden" name="name" value="{{.ProjectItem.Name}}">
-    <div>
-      <label for="project-fetch-interval">Idle interval (minutes)</label>
-      <input id="project-fetch-interval" type="number" name="repoFetchIntervalMinutes" min="0" step="1" required
-        value="{{.ProjectItem.RepoFetchIntervalMinutes}}" autocomplete="off">
-    </div>
-    <div class="form-actions" style="align-self:end"><button type="submit">Save</button></div>
-  </form>
-</div>
-
-<div class="section card" id="project-discord">
-  <h2>Discord</h2>
-  <p class="sub" style="margin-top:0">
-    The preferred channel hosts threads for web-started work units; it must be one of the mapped channels below.
-    The guild ID makes “Open in Discord” deep-link the right server (multi-guild setups).
-  </p>
-  <form class="inline" method="post" action="{{route "config.setProjectChannel"}}" style="grid-template-columns: 1fr 1fr auto;">
-    {{template "csrf" $}}
-    <input type="hidden" name="name" value="{{.ProjectItem.Name}}">
-    <div>
-      <label for="project-channel">Preferred channel</label>
-      <select id="project-channel" name="channelId">
-        <option value="">(auto / reverse-map)</option>
-        {{$pref := .ProjectItem.DiscordChannelID}}
-        {{range .ProjectItem.ChannelOptions}}
-        <option value="{{.}}" {{if eq . $pref}}selected{{end}}>{{.}}</option>
+    {{if .ProjectItem.SafeTeamMode}}
+    <div class="choice-extra">
+      <label for="safe-team-default-tpl">Default role for members without one</label>
+      <select id="safe-team-default-tpl" name="safeTeamDefaultTemplate" data-autosubmit>
+        {{$curTpl := .ProjectItem.SafeTeamDefaultTemplate}}
+        {{range .ProjectItem.CapabilityTemplateNames}}
+        <option value="{{.}}" {{if eq . $curTpl}}selected{{end}}>{{.}}</option>
         {{end}}
       </select>
-    </div>
-    <div>
-      <label for="project-guild">Discord guild ID</label>
-      <input id="project-guild" type="text" name="guildId" value="{{.ProjectItem.DiscordGuildID}}" placeholder="server snowflake" autocomplete="off">
-    </div>
-    <button type="submit">Save Discord</button>
-  </form>
-  <p class="sub" style="margin:0.5rem 0 0">Empty guild falls back to the default guild on <a href="{{route "config"}}#default-guild">Config</a>.</p>
-
-  <div style="border-top:1px solid var(--border); margin-top:1.1rem; padding-top:1rem;">
-    <h2>Mapped channels</h2>
-    <p class="sub" style="margin-top:0">Tagging <span class="mono">@Grok</span> in these Discord channels starts tasks for this project.</p>
-    {{if .ProjectItem.ChannelOptions}}
-    <div class="table-scroll" style="margin-bottom:0.85rem;">
-    <table>
-      <thead><tr><th>Channel ID</th><th></th></tr></thead>
-      <tbody>
-        {{range .ProjectItem.ChannelOptions}}
-        <tr>
-          <td class="mono">{{.}}</td>
-          <td class="row-actions">
-            <form method="post" action="{{route "config.removeChannel"}}" onsubmit="return confirm('Unmap channel {{.}}?');">
-              {{template "csrf" $}}
-              <input type="hidden" name="channelId" value="{{.}}">
-              <input type="hidden" name="project" value="{{$.ProjectItem.Name}}">
-              <input type="hidden" name="return_to" value="project">
-              <button type="submit" class="btn-danger">Unmap</button>
-            </form>
-          </td>
-        </tr>
-        {{end}}
-      </tbody>
-    </table>
+      <span class="muted" style="font-size:0.75rem">Assign eng members <span class="mono">builder</span> below so they can still ship.</span>
     </div>
     {{else}}
-    <div class="empty" style="margin-bottom:0.85rem;">No channels mapped — tasks cannot start from Discord until one is.</div>
+    <input type="hidden" name="safeTeamDefaultTemplate" value="{{.ProjectItem.SafeTeamDefaultTemplate}}">
     {{end}}
-    <form class="inline" method="post" action="{{route "config.addChannel"}}" style="grid-template-columns: 1fr auto;">
-      {{template "csrf" $}}
-      <input type="hidden" name="project" value="{{.ProjectItem.Name}}">
-      <input type="hidden" name="return_to" value="project">
-      <div>
-        <label for="project-add-channel">Discord channel ID</label>
-        <input id="project-add-channel" type="text" name="channelId" placeholder="123456789012345678" required autocomplete="off">
-      </div>
-      <button type="submit">Map channel</button>
-    </form>
-  </div>
+    <noscript><div class="form-actions"><button type="submit">Save policy</button></div></noscript>
+  </form>
 </div>
-
 
 <div class="section card" id="project-members">
   <h2>Members</h2>
   <p class="sub" style="margin-top:0">
-    Discord users and roles allowed to <span class="mono">@Grok</span> on this project’s channels.
-    Empty lists are fail-closed (nobody can task the bot here). Web UI visibility uses user IDs (not roles).
+    Who can <span class="mono">@Grok</span> on this project’s channels, and their role.
+    Role changes save immediately. Web UI visibility follows user entries; Discord roles apply in chat only.
   </p>
   {{if not .ProjectItem.AllowedUserIDs}}{{if not .ProjectItem.AllowedRoleIDs}}
-  <div class="flash err" style="margin-bottom:0.85rem;">No members — add at least one user or role or nobody can use Grok on this project.</div>
+  <div class="flash err" style="margin-bottom:0.85rem;">No members — add at least one user or role or nobody can use Grok on this project (fail-closed).</div>
   {{end}}{{end}}
-  <form class="inline" method="post" action="{{route "config.addProjectUser"}}" style="grid-template-columns: 1fr auto; margin-bottom:0.65rem;">
+
+  {{if .Members}}
+  <div class="roster" id="member-roster">
+    <div class="roster-head">
+      <span>Member</span><span>Role</span><span>Can do</span><span></span>
+    </div>
+    {{range .Members}}
+    <div class="roster-row{{if .Inert}} attention{{end}}">
+      <span class="who">
+        <span class="avatar{{if .IsRole}} role-badge{{end}}">{{.Initials}}</span>
+        <span class="id-wrap">
+          <span class="name">{{if .Name}}{{.Name}}{{else}}<span class="mono">{{.ID}}</span>{{end}}{{if .IsRole}}<span class="kind-tag">role</span>{{end}}</span>
+          {{if .Name}}<span class="snowflake">{{.ID}}</span>{{else if .Inert}}<span class="snowflake">not on member list</span>{{end}}
+        </span>
+      </span>
+      <span class="role-cell">
+        <form method="post" action="{{if .IsRole}}{{route "config.setProjectCapabilityRole"}}{{else}}{{route "config.setProjectCapabilityUser"}}{{end}}">
+          {{template "csrf" $}}
+          <input type="hidden" name="name" value="{{$.ProjectItem.Name}}">
+          <input type="hidden" name="id" value="{{.ID}}">
+          <select name="template" data-autosubmit {{if not .Explicit}}class="is-default"{{end}} aria-label="Role for {{.ID}}">
+            <option value="" {{if not .Explicit}}selected{{end}}>default → {{$.DefaultRoleFallback}}</option>
+            {{$row := .}}
+            {{range $.ProjectItem.CapabilityTemplateNames}}
+            <option value="{{.}}" {{if eq . $row.Template}}selected{{end}}>{{.}}</option>
+            {{end}}
+            {{if .TemplateUnknown}}<option value="{{.Template}}" selected>{{.Template}} (unknown)</option>{{end}}
+          </select>
+          <noscript><button type="submit" class="btn-secondary" style="height:2.1rem;font-size:0.78rem;margin-top:0.3rem;">Set</button></noscript>
+        </form>
+      </span>
+      {{if .Inert}}
+      <span class="attention-note">⚠ has a role but no membership — cannot use Grok.
+        <form method="post" action="{{if .IsRole}}{{route "config.addProjectRole"}}{{else}}{{route "config.addProjectUser"}}{{end}}">
+          {{template "csrf" $}}
+          <input type="hidden" name="name" value="{{$.ProjectItem.Name}}">
+          <input type="hidden" name="id" value="{{.ID}}">
+          <button type="submit">Add as member</button>
+        </form>
+      </span>
+      {{else}}
+      <span class="caps">
+        {{$row := .}}
+        {{range .Caps}}<span class="cap{{if eq . "admin"}} danger-cap{{else if and $row.Explicit (not $row.TemplateUnknown)}} hi{{end}}">{{.}}</span>{{end}}
+      </span>
+      {{end}}
+      {{if .Inert}}
+      <form class="row-x-form" method="post" action="{{if .IsRole}}{{route "config.removeProjectCapabilityRole"}}{{else}}{{route "config.removeProjectCapabilityUser"}}{{end}}" onsubmit="return confirm('Remove role assignment for {{.ID}}?');">
+        {{template "csrf" $}}
+        <input type="hidden" name="name" value="{{$.ProjectItem.Name}}">
+        <input type="hidden" name="id" value="{{.ID}}">
+        <button type="submit" class="row-x" title="Remove role assignment">×</button>
+      </form>
+      {{else}}
+      <form class="row-x-form" method="post" action="{{if .IsRole}}{{route "config.removeProjectRole"}}{{else}}{{route "config.removeProjectUser"}}{{end}}" onsubmit="return confirm('Remove {{if .IsRole}}role{{else}}user{{end}} {{.ID}} from this project?');">
+        {{template "csrf" $}}
+        <input type="hidden" name="name" value="{{$.ProjectItem.Name}}">
+        <input type="hidden" name="id" value="{{.ID}}">
+        <button type="submit" class="row-x" title="Remove member">×</button>
+      </form>
+      {{end}}
+    </div>
+    {{end}}
+  </div>
+  {{end}}
+
+  <form class="inline" method="post" action="{{route "config.addProjectMember"}}" style="grid-template-columns: 7rem 1fr 11rem auto; margin-top:0.85rem;">
     {{template "csrf" $}}
     <input type="hidden" name="name" value="{{.ProjectItem.Name}}">
     <div>
-      <label for="project-user-id">Discord user ID</label>
-      <input id="project-user-id" type="text" name="id" placeholder="123456789012345678" required autocomplete="off">
+      <label for="member-kind">Type</label>
+      <select id="member-kind" name="kind">
+        <option value="user">User</option>
+        <option value="role">Role</option>
+      </select>
     </div>
-    <button type="submit">Add user</button>
-  </form>
-  {{if .ProjectItem.AllowedUserIDs}}
-  <div class="table-scroll" style="margin-bottom:1rem;">
-  <table>
-    <thead><tr><th>User</th><th></th></tr></thead>
-    <tbody>
-      {{range .ProjectItem.AllowedUserIDs}}
-      <tr>
-        <td>
-          <span class="mono">{{.}}</span>{{with index $.DiscordUserNames .}} <span class="muted">{{.}}</span>{{end}}
-        </td>
-        <td class="row-actions">
-          <form method="post" action="{{route "config.removeProjectUser"}}" onsubmit="return confirm('Remove user {{.}}?');">
-            {{template "csrf" $}}
-            <input type="hidden" name="name" value="{{$.ProjectItem.Name}}">
-            <input type="hidden" name="id" value="{{.}}">
-            <button type="submit" class="btn-danger">Remove</button>
-          </form>
-        </td>
-      </tr>
-      {{end}}
-    </tbody>
-  </table>
-  </div>
-  {{else}}
-  <div class="empty" style="margin-bottom:1rem;">No users.</div>
-  {{end}}
-  <form class="inline" method="post" action="{{route "config.addProjectRole"}}" style="grid-template-columns: 1fr auto; margin-bottom:0.65rem;">
-    {{template "csrf" $}}
-    <input type="hidden" name="name" value="{{.ProjectItem.Name}}">
     <div>
-      <label for="project-role-id">Discord role ID</label>
-      <input id="project-role-id" type="text" name="id" placeholder="123456789012345678" required autocomplete="off">
+      <label for="member-id">Discord ID</label>
+      <input id="member-id" type="text" name="id" placeholder="user or role snowflake" required autocomplete="off">
     </div>
-    <button type="submit">Add role</button>
-  </form>
-  {{if .ProjectItem.AllowedRoleIDs}}
-  <div class="table-scroll">
-  <table>
-    <thead><tr><th>Role ID</th><th></th></tr></thead>
-    <tbody>
-      {{range .ProjectItem.AllowedRoleIDs}}
-      <tr>
-        <td class="mono">{{.}}</td>
-        <td class="row-actions">
-          <form method="post" action="{{route "config.removeProjectRole"}}" onsubmit="return confirm('Remove role {{.}}?');">
-            {{template "csrf" $}}
-            <input type="hidden" name="name" value="{{$.ProjectItem.Name}}">
-            <input type="hidden" name="id" value="{{.}}">
-            <button type="submit" class="btn-danger">Remove</button>
-          </form>
-        </td>
-      </tr>
-      {{end}}
-    </tbody>
-  </table>
-  </div>
-  {{else}}
-  <div class="empty">No roles.</div>
-  {{end}}
-</div>
-
-<div class="section card" id="project-linear">
-  <h2>Linear</h2>
-  <p class="sub" style="margin-top:0">
-    Opt-in ticket binding for this project.
-    {{if .ProjectItem.LinearAPIKeySet}}<span class="badge status-done">API key set</span>{{else}}<span class="badge">no API key</span>{{end}}
-    · env alternative: <span class="mono">{{.ProjectItem.LinearEnvHint}}</span>
-  </p>
-  <form method="post" action="{{route "config.setProjectLinear"}}">
-    {{template "csrf" $}}
-    <input type="hidden" name="name" value="{{.ProjectItem.Name}}">
-    <div class="inline" style="grid-template-columns: auto 1fr 1fr; margin-bottom:0.65rem;">
-      <label class="check">
-        <input type="checkbox" name="enabled" value="1" {{if .ProjectItem.LinearEnabled}}checked{{end}}>
-        Enabled
-      </label>
-      <div>
-        <label for="project-linear-team">Team key</label>
-        <input id="project-linear-team" type="text" name="teamKey" value="{{.ProjectItem.LinearTeamKey}}" placeholder="ENG" autocomplete="off">
-      </div>
-      <div>
-        <label for="project-linear-key">API key</label>
-        <input id="project-linear-key" type="password" name="apiKey" placeholder="leave blank to keep" autocomplete="off">
-      </div>
+    <div>
+      <label for="member-tpl">Role</label>
+      <select id="member-tpl" name="template">
+        <option value="">default → {{.DefaultRoleFallback}}</option>
+        {{range .ProjectItem.CapabilityTemplateNames}}
+        <option value="{{.}}">{{.}}</option>
+        {{end}}
+      </select>
     </div>
-    <label class="check">
-      <input type="checkbox" name="clearApiKey" value="1"> Clear stored API key
-    </label>
-    <div class="form-actions"><button type="submit">Save Linear</button></div>
+    <button type="submit">Add member</button>
   </form>
-</div>
 
-<div class="section card danger-zone" id="project-danger">
-  <h2>Danger zone</h2>
-  <p class="sub" style="margin-top:0">
-    Removing the project also removes its channel mappings. Existing worktrees, sessions, and history are not touched.
-  </p>
-  <form method="post" action="{{route "config.removeProject"}}" onsubmit="return confirm('Remove project {{.ProjectItem.Name}}? Channel maps to this project will also be removed.');">
-    {{template "csrf" $}}
-    <input type="hidden" name="name" value="{{.ProjectItem.Name}}">
-    <button type="submit" class="btn-danger">Remove project</button>
-  </form>
+  <details class="cap-matrix-details">
+    <summary>What each role can do</summary>
+    <div class="table-scroll">
+      <table class="cap-matrix">
+        <thead>
+          <tr><th>role</th>{{range .CapNames}}<th>{{.}}</th>{{end}}</tr>
+        </thead>
+        <tbody>
+          {{range .CapMatrix}}
+          <tr><td class="mono">{{.Name}}</td>{{range .Flags}}<td class="{{if .}}dot-y{{else}}dot-n{{end}}">{{if .}}●{{else}}·{{end}}</td>{{end}}</tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  </details>
+</div>
 </div>
 {{end}}
