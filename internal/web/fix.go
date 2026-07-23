@@ -415,6 +415,8 @@ func (s *Server) mapFixError(ctx *hime.Context, err error, rc fixRedirectContext
 		return s.fixSourceRedirect(ctx, rc, "", msg, http.StatusBadRequest)
 	case errors.Is(err, bot.ErrInvalidIssue), errors.Is(err, bot.ErrProjectRequired):
 		return s.fixSourceRedirect(ctx, rc, "", msg, http.StatusBadRequest)
+	case errors.Is(err, bot.ErrCannotStartFix):
+		return s.fixSourceRedirect(ctx, rc, "", msg, http.StatusForbidden)
 	default:
 		// PreferDiscordChannel and other config errors → 400
 		low := strings.ToLower(msg)

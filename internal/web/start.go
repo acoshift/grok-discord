@@ -13,9 +13,9 @@ import (
 )
 
 // startComposer renders the "Start a task" page: the web equivalent of tagging
-// @Grok in a mapped Discord channel. The page renders read-only when the viewer
+// @Grok in a mapped channel. The page renders read-only when the viewer
 // cannot start sessions; the hard gate lives on the POST (requireFeature +
-// requireMember).
+// requireMember). Fix & ship is hidden without project CanShip caps.
 func (s *Server) startComposer(ctx *hime.Context) error {
 	project := strings.TrimSpace(ctx.PathValue("project"))
 	if err := s.ensureProjectAccess(ctx, project); err != nil {
@@ -31,6 +31,8 @@ func (s *Server) startComposer(ctx *hime.Context) error {
 	if d.StartDefaultMode == "" {
 		d.StartDefaultMode = "fix"
 	}
+	// Fix & ship only when the actor can actually ship (builder-class caps).
+	d.CanStartFixMode = d.CanStartSession && s.cfg.ResolveCapabilities(project, d.UserID, nil).CanShip()
 	d.Flash = strings.TrimSpace(ctx.FormValue("ok"))
 	if e := strings.TrimSpace(ctx.FormValue("err")); e != "" {
 		d.Error = e

@@ -5,6 +5,7 @@ import (
 	"log"
 	"strings"
 
+	"github.com/acoshift/grokwork/internal/config"
 	"github.com/acoshift/grokwork/internal/sessionstore"
 )
 
@@ -53,6 +54,12 @@ func (b *Bot) StartWebTask(opts StartWebTaskOpts) (FixStartResult, error) {
 		goal = clampGoal(t)
 	}
 	kind := webTaskKind(opts.Mode)
+	// Hard-block Fix & ship without builder-class caps (no silent coerce).
+	if wantsFixStartMode(opts.Mode, b.cfg.ProjectDefaultMode(project)) {
+		if err := b.requireCanStartFix(project, opts.Actor.ID, nil); err != nil {
+			return FixStartResult{}, err
+		}
+	}
 
 	bind := func(threadID, discordURL string) error {
 		return b.bindWebStartedSession(threadID, project, goal, opts.Actor, discordURL, true)
@@ -112,6 +119,36 @@ func webTaskKind(mode string) Kind {
 	default:
 		return KindTask
 	}
+}
+
+// wantsFixStartMode reports whether a web start form mode (or project default
+// when mode is empty) requests Fix & ship.
+func wantsFixStartMode(mode, projectDefault string) bool {
+	m := strings.ToLower(strings.TrimSpace(mode))
+	if m == "" {
+		m = strings.ToLower(strings.TrimSpace(projectDefault))
+	}
+	if m == "" {
+		m = ModeFix
+	}
+	return m == ModeFix
+}
+
+// requireCanStartFix fails when the actor lacks CanShip (startSessions +
+// githubWrites). Used by web StartWebTask / StartFix and Discord /start fix.
+// Nil config matches ResolveCapabilities (builder default for unmapped legacy).
+func (b *Bot) requireCanStartFix(project, userID string, roleIDs []string) error {
+	if b == nil {
+		return ErrCannotStartFix
+	}
+	caps := config.BuiltinCapabilityTemplates["builder"]
+	if b.cfg != nil {
+		caps = b.cfg.ResolveCapabilities(project, userID, roleIDs)
+	}
+	if !caps.CanShip() {
+		return ErrCannotStartFix
+	}
+	return nil
 }
 
 // bindWebStartedSession stamps workflow metadata + owner onto a web-started unit.

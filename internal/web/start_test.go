@@ -275,6 +275,71 @@ func TestStartPageReadOnlyForViewer(t *testing.T) {
 	}
 }
 
+// Investigator (Safe Team) must not see Fix & ship and cannot POST it.
+func TestStartInvestigatorHidesFixAndBlocksPOST(t *testing.T) {
+	srv, cfg, b := fixEnabledServer(t)
+	t.Cleanup(func() { bot.WaitIdleForTest(b, 5*time.Second) })
+	if err := cfg.SetProjectSafeTeam("proj", true, "investigator", ""); err != nil {
+		t.Fatal(err)
+	}
+	// Map member as investigator explicitly (Safe Team default is investigator too).
+	if err := cfg.SetProjectCapabilityByUser("proj", "member-1", "investigator"); err != nil {
+		t.Fatal(err)
+	}
+	sid, csrf, err := srv.LoginAs("member-1", "M", config.WebRoleMember)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// GET: no Fix & ship option
+	req := httptest.NewRequest(http.MethodGet, "/projects/proj/start", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sid})
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	// Option labels (not the "Fix & ship requires …" rail note).
+	if strings.Contains(body, `value="fix"`) || strings.Contains(body, `Fix &amp; ship (default)`) {
+		t.Fatalf("investigator must not see Fix & ship mode option: %s", body[:min(1200, len(body))])
+	}
+	if !strings.Contains(body, `value="investigate"`) {
+		t.Fatal("investigate option required")
+	}
+	if !strings.Contains(body, "builder-class") {
+		t.Fatal("expected rail note about builder-class caps")
+	}
+	// POST mode=fix → redirect with err
+	w2 := postFix(t, srv, "/projects/proj/start", sid, csrf, url.Values{
+		"prompt": {"ship it"},
+		"mode":   {"fix"},
+	})
+	if w2.Code != http.StatusFound && w2.Code != http.StatusSeeOther {
+		t.Fatalf("status=%d body=%s", w2.Code, w2.Body.String())
+	}
+	loc := w2.Header().Get("Location")
+	if !strings.HasPrefix(loc, "/projects/proj/start") || !strings.Contains(loc, "err=") {
+		t.Fatalf("Location=%q want start page with err", loc)
+	}
+	if !strings.Contains(loc, "startSessions") && !strings.Contains(loc, "not+allowed") && !strings.Contains(loc, "not%20allowed") {
+		// err is URL-encoded; accept either encoding of the sentinel message
+		if !strings.Contains(loc, "githubWrites") && !strings.Contains(strings.ToLower(loc), "fix") {
+			t.Fatalf("Location=%q want fix-denied err", loc)
+		}
+	}
+	// POST investigate still works
+	w3 := postFix(t, srv, "/projects/proj/start", sid, csrf, url.Values{
+		"prompt": {"look into flake"},
+		"mode":   {"investigate"},
+	})
+	if w3.Code != http.StatusFound && w3.Code != http.StatusSeeOther {
+		t.Fatalf("investigate status=%d body=%s", w3.Code, w3.Body.String())
+	}
+	if loc3 := w3.Header().Get("Location"); !strings.HasPrefix(loc3, "/sessions/") {
+		t.Fatalf("investigate Location=%q", loc3)
+	}
+}
+
 // assertAuditDetailContains asserts today's audit log contains substr somewhere.
 func assertAuditDetailContains(t *testing.T, srv *Server, substr string) {
 	t.Helper()

@@ -158,6 +158,91 @@ func TestStartWebTaskEmptyPrompt(t *testing.T) {
 	}
 }
 
+func TestStartWebTaskInvestigatorDeniedFixMode(t *testing.T) {
+	dir := t.TempDir()
+	on := true
+	cfg := &config.Config{
+		Projects: config.ProjectsMap{
+			"app": {
+				Path:             dir,
+				SafeTeamMode:     &on,
+				AllowedUserIDs:   []string{"inv1"},
+				CapabilityByUser: map[string]string{"inv1": "investigator"},
+			},
+		},
+	}
+	b := &Bot{cfg: cfg}
+	// Explicit fix mode
+	_, err := b.StartWebTask(StartWebTaskOpts{
+		Project: "app",
+		Prompt:  "ship a fix",
+		Actor:   Actor{ID: "inv1", DisplayName: "Inv"},
+		Mode:    ModeFix,
+	})
+	if !errors.Is(err, ErrCannotStartFix) {
+		t.Fatalf("explicit fix: err=%v want ErrCannotStartFix", err)
+	}
+	// Empty mode + project default fix (legacy empty = fix)
+	_, err = b.StartWebTask(StartWebTaskOpts{
+		Project: "app",
+		Prompt:  "ship a fix",
+		Actor:   Actor{ID: "inv1", DisplayName: "Inv"},
+	})
+	if !errors.Is(err, ErrCannotStartFix) {
+		t.Fatalf("default fix: err=%v want ErrCannotStartFix", err)
+	}
+	// Investigate still allowed (no unit created without sessions/grok — may fail later)
+	// Gate must not return ErrCannotStartFix for investigate.
+	_, err = b.StartWebTask(StartWebTaskOpts{
+		Project: "app",
+		Prompt:  "look into timeout",
+		Actor:   Actor{ID: "inv1", DisplayName: "Inv"},
+		Mode:    ModeInvestigate,
+	})
+	if errors.Is(err, ErrCannotStartFix) {
+		t.Fatal("investigate must not hard-block as fix")
+	}
+}
+
+func TestWantsFixStartMode(t *testing.T) {
+	if !wantsFixStartMode("", "") {
+		t.Fatal("empty+empty default fix")
+	}
+	if !wantsFixStartMode("fix", "investigate") {
+		t.Fatal("explicit fix")
+	}
+	if wantsFixStartMode("investigate", "") {
+		t.Fatal("investigate not fix")
+	}
+	if wantsFixStartMode("", "investigate") {
+		t.Fatal("default investigate not fix")
+	}
+	if wantsFixStartMode("explain", "fix") {
+		t.Fatal("explain not fix")
+	}
+}
+
+func TestRequireCanStartFixInvestigator(t *testing.T) {
+	on := true
+	cfg := &config.Config{
+		Projects: config.ProjectsMap{
+			"app": {
+				Path:             t.TempDir(),
+				SafeTeamMode:     &on,
+				AllowedUserIDs:   []string{"inv1", "eng1"},
+				CapabilityByUser: map[string]string{"inv1": "investigator", "eng1": "builder"},
+			},
+		},
+	}
+	b := &Bot{cfg: cfg}
+	if err := b.requireCanStartFix("app", "inv1", nil); !errors.Is(err, ErrCannotStartFix) {
+		t.Fatalf("investigator: %v", err)
+	}
+	if err := b.requireCanStartFix("app", "eng1", nil); err != nil {
+		t.Fatalf("builder: %v", err)
+	}
+}
+
 // A web-originated investigate task must never open a PR — same policy path as
 // Discord "/start investigate" (mode select → KindStartInvestigate → snapshot).
 func TestStartWebTaskInvestigateNonShip(t *testing.T) {

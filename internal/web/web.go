@@ -496,6 +496,9 @@ type pageData struct {
 	StartDirectShip  bool   // ship mode badge: true → Direct to primary, false → PR mode
 	StartDiscordDest bool   // a start would open a Discord thread (gateway up + mapped channel)
 	StartDefaultMode string // project default mode (empty normalized to "fix")
+	// CanStartFixMode: project CanShip (startSessions + githubWrites). Hides Fix &
+	// ship in the start dropdown; POSTs hard-deny without these caps.
+	CanStartFixMode bool
 	// Case intake (/projects/{project}/cases/new + board CTAs): Discord /case
 	// parity — startSessions feature+role AND investigator-class capability.
 	CanOpenCase bool

@@ -20,12 +20,21 @@
     <div class="field">
       <label for="start-mode">Mode</label>
       <select id="start-mode" name="mode">
-        {{if eq .StartDefaultMode "fix"}}<option value="">Fix &amp; ship (default)</option>{{else}}<option value="">Project default ({{.StartDefaultMode}})</option>
-        <option value="fix">Fix &amp; ship</option>{{end}}
-        <option value="investigate">Investigate</option>
-        <option value="explain">Explain</option>
+        {{if .CanStartFixMode}}
+          {{if eq .StartDefaultMode "fix"}}<option value="">Fix &amp; ship (default)</option>{{else}}<option value="">Project default ({{.StartDefaultMode}})</option>
+          <option value="fix">Fix &amp; ship</option>{{end}}
+          <option value="investigate">Investigate</option>
+          <option value="explain">Explain</option>
+        {{else}}
+          <option value="investigate" selected>Investigate</option>
+          <option value="explain">Explain</option>
+        {{end}}
       </select>
+      {{if .CanStartFixMode}}
       <p class="rail-note" style="margin-top:0.4rem">Investigate never opens PRs or ships.</p>
+      {{else}}
+      <p class="rail-note" style="margin-top:0.4rem">Fix &amp; ship requires builder-class project caps (<span class="mono">startSessions</span> + <span class="mono">githubWrites</span>). Investigate never opens PRs or ships.</p>
+      {{end}}
     </div>
     <div class="form-actions"><button type="submit" id="btn-start">Start task</button></div>
   </form>
@@ -43,11 +52,15 @@
     {{if .IsAdmin}}<a href="/config/projects/{{.Project}}">settings</a>{{else}}project settings{{end}})
     and stays sticky for the life of the session.
   </p>
+  {{if .CanStartFixMode}}
   <p class="sub" style="margin-top:0.35rem">
     When a run ships:
     {{if .StartDirectShip}}<span class="badge">Direct to primary</span> — the bot fast-forwards the project default branch and pushes; no PR.{{else}}<span class="badge">PR mode</span> — the session works on a managed branch and opens a pull request.{{end}}
   </p>
   {{if ne .StartDefaultMode "fix"}}<p class="sub" style="margin-top:0.35rem">Project default mode is <span class="mono">{{.StartDefaultMode}}</span> — investigate and explain runs never ship.</p>{{end}}
+  {{else}}
+  <p class="sub" style="margin-top:0.35rem">Your project role cannot Fix &amp; ship — only investigate/explain runs are available here.</p>
+  {{end}}
   <p class="sub" style="margin-top:0.35rem">
     Destination:
     {{if .StartDiscordDest}}opens a Discord thread in this project's mapped channel.{{else}}<span class="mono">web-native</span> — no Discord thread; the run streams here only.{{end}}

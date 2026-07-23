@@ -17,6 +17,9 @@ var (
 	ErrLinearDisabled  = errors.New("linear is not enabled for this project")
 	ErrProjectRequired = errors.New("project required")
 	ErrInvalidIssue    = errors.New("invalid issue")
+	// ErrCannotStartFix is returned when the actor lacks builder-class ship caps
+	// (startSessions + githubWrites) for an explicit fix / Fix-with-Grok start.
+	ErrCannotStartFix = errors.New("you're not allowed to start fix tasks on this project (need startSessions and githubWrites)")
 )
 
 // FixKind selects GitHub vs Linear fix start.
@@ -86,6 +89,9 @@ func (b *Bot) StartFix(opts FixStartOpts) (FixStartResult, error) {
 	cwd, ok := b.cfg.ProjectPath(project)
 	if !ok || strings.TrimSpace(cwd) == "" {
 		return FixStartResult{}, fmt.Errorf("unknown project %q", project)
+	}
+	if err := b.requireCanStartFix(project, opts.Actor.ID, nil); err != nil {
+		return FixStartResult{}, err
 	}
 
 	switch opts.Kind {

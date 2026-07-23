@@ -1208,26 +1208,40 @@ func (b *Bot) handleTask(s *discordgo.Session, m *discordgo.MessageCreate, parse
 	if m.Member != nil {
 		roleIDs = m.Member.Roles
 	}
-	// Capability gate (PR6): investigators without start/write still may investigate.
+	// Capability gate (PR6): investigators may investigate freeform; Fix & ship needs CanShip.
 	if b.cfg != nil {
 		caps := b.cfg.ResolveCapabilities(proj.Name, item.actor.ID, roleIDs)
-		wantInvestigate := parsed.Kind == KindStartInvestigate || parsed.Kind == KindStartExplain
-		if !wantInvestigate && !caps.StartSessions && !caps.Investigate {
-			b.postOrEditThreadStatus(s, threadID, statusMsgID,
-				"You're not allowed to start tasks on this project (no capabilities).", actionBarDone(threadID, b.sessionWebURL(threadID)))
+		deny := func(msg string) {
+			b.postOrEditThreadStatus(s, threadID, statusMsgID, msg, actionBarDone(threadID, b.sessionWebURL(threadID)))
 			if b.runs != nil {
 				b.runs.RemoveTaskFiles(threadID, taskID)
 			}
-			return
 		}
-		// Freeform/fix without StartSessions: still allowed if Investigate (coerce later).
-		if !wantInvestigate && !caps.StartSessions && !caps.GithubWrites && !caps.Investigate {
-			b.postOrEditThreadStatus(s, threadID, statusMsgID,
-				"You're not allowed to start fix tasks on this project.", actionBarDone(threadID, b.sessionWebURL(threadID)))
-			if b.runs != nil {
-				b.runs.RemoveTaskFiles(threadID, taskID)
+		switch parsed.Kind {
+		case KindStartInvestigate, KindStartExplain:
+			// Allow when allowlisted; investigate/explain never ship.
+		case KindStartFix:
+			// Mode=case: /start fix is escalate (FileEscalation or builder-class).
+			// Non-case: hard-require CanShip — no silent coerce to investigate.
+			isCase := false
+			if e, ok := b.sessions.Get(threadID); ok && e.IsCase() {
+				isCase = true
 			}
-			return
+			if isCase {
+				if !canEscalateCase(caps) {
+					deny("You're not allowed to escalate cases (need fileEscalation or builder caps).")
+					return
+				}
+			} else if !caps.CanShip() {
+				deny("You're not allowed to start fix tasks on this project (need startSessions and githubWrites).")
+				return
+			}
+		default:
+			// Freeform: need some useful cap; missing ship still allowed (coerce later).
+			if !caps.StartSessions && !caps.Investigate && !caps.GithubWrites {
+				deny("You're not allowed to start tasks on this project (no capabilities).")
+				return
+			}
 		}
 	}
 	b.snapshotPolicyOntoItem(&item, proj.Name, roleIDs)
