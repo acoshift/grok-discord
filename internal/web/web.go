@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"embed"
 	"fmt"
 	"io/fs"
@@ -17,6 +18,7 @@ import (
 	"github.com/acoshift/grokwork/internal/bot"
 	"github.com/acoshift/grokwork/internal/config"
 	"github.com/acoshift/grokwork/internal/ghpr"
+	"github.com/acoshift/grokwork/internal/grokrun"
 	"github.com/acoshift/grokwork/internal/history"
 	"github.com/acoshift/grokwork/internal/linear"
 	"github.com/acoshift/grokwork/internal/markdown"
@@ -52,6 +54,12 @@ type Server struct {
 	// Short-TTL GitHub issue list cache (page shell + partial share one gh call).
 	issueListMu sync.Mutex
 	issueLists  map[string]issueListCacheEntry
+	// One-shot Grok drafts for project verify commands (filled into the
+	// workflow textarea after "Suggest with Grok"; not persisted until Save).
+	verifyDraftMu sync.Mutex
+	verifyDrafts  map[string]string
+	// Test injectable; nil → grokrun.SuggestVerifyCommands.
+	suggestVerify func(ctx context.Context, grokBin, model, cwd string, timeout time.Duration) (string, error)
 }
 
 // New builds a hime app with dashboard, history, config, and SSE routes.
@@ -109,6 +117,7 @@ func New(cfg *config.Config, sessions *sessionstore.Store, hist *history.Store, 
 		"config.setProjectShip":              "/config/projects/ship",
 		"config.setProjectSafeTeam":          "/config/projects/safe-team",
 		"config.setProjectVerify":            "/config/projects/verify",
+		"config.generateProjectVerify":       "/config/projects/verify/generate",
 		"config.setProjectMode":              "/config/projects/mode",
 		"config.addProjectMember":            "/config/projects/members",
 		"config.setProjectCapabilityUser":    "/config/projects/capabilities/users",
@@ -335,6 +344,7 @@ func New(cfg *config.Config, sessions *sessionstore.Store, hist *history.Store, 
 	mux.Handle("POST /config/projects/mode", s.requireAdmin(hime.Handler(s.setProjectMode)))
 	mux.Handle("POST /config/projects/members", s.requireAdmin(hime.Handler(s.addProjectMember)))
 	mux.Handle("POST /config/projects/verify", s.requireAdmin(hime.Handler(s.setProjectVerify)))
+	mux.Handle("POST /config/projects/verify/generate", s.requireAdmin(hime.Handler(s.generateProjectVerify)))
 	mux.Handle("POST /config/projects/capabilities/users", s.requireAdmin(hime.Handler(s.setProjectCapabilityUser)))
 	mux.Handle("POST /config/projects/capabilities/users/remove", s.requireAdmin(hime.Handler(s.removeProjectCapabilityUser)))
 	mux.Handle("POST /config/projects/capabilities/roles", s.requireAdmin(hime.Handler(s.setProjectCapabilityRole)))
@@ -1027,6 +1037,8 @@ func (s *Server) setProjectVerify(ctx *hime.Context) error {
 	s.auditAction(ctx, "config.set_project_verify", err, map[string]any{
 		"name": name, "count": len(cmds),
 	})
+	// Discard any pending Grok draft once the admin saves.
+	s.clearVerifyDraft(name)
 	msg := fmt.Sprintf("Cleared verify commands for project %q", name)
 	if len(cmds) == 1 {
 		msg = fmt.Sprintf("Saved 1 verify command for project %q", name)
@@ -1034,6 +1046,87 @@ func (s *Server) setProjectVerify(ctx *hime.Context) error {
 		msg = fmt.Sprintf("Saved %d verify commands for project %q", len(cmds), name)
 	}
 	return s.projectConfigTabRedirect(ctx, name, "workflow", msg, err)
+}
+
+// generateProjectVerify runs a short Grok inspect of the project checkout and
+// fills the verify-commands textarea with a draft (not saved until Save).
+func (s *Server) generateProjectVerify(ctx *hime.Context) error {
+	name := strings.TrimSpace(ctx.PostFormValue("name"))
+	if name == "" {
+		return s.projectConfigTabRedirect(ctx, name, "workflow", "", fmt.Errorf("project name is required"))
+	}
+	path, ok := s.cfg.ProjectPath(name)
+	if !ok {
+		return s.projectConfigTabRedirect(ctx, name, "workflow", "", fmt.Errorf("project %q not found", name))
+	}
+
+	snap := s.cfg.Snapshot()
+	suggest := s.suggestVerify
+	if suggest == nil {
+		suggest = grokrun.SuggestVerifyCommands
+	}
+	raw, err := suggest(ctx.Context(), snap.GrokBin, snap.Model, path, 3*time.Minute)
+	s.auditAction(ctx, "config.generate_project_verify", err, map[string]any{
+		"name": name,
+	})
+	if err != nil {
+		return s.projectConfigTabRedirect(ctx, name, "workflow", "", err)
+	}
+	// Production suggest already cleans; still extract so injectable/mocks and
+	// partial model prose parse reliably.
+	if cleaned := grokrun.ExtractVerifyCommandsText(raw); cleaned != "" {
+		raw = cleaned
+	}
+	cmds, err := config.ParseVerifyCommandsText(raw)
+	if err != nil {
+		return s.projectConfigTabRedirect(ctx, name, "workflow", "", fmt.Errorf("could not parse Grok output: %w", err))
+	}
+	if len(cmds) == 0 {
+		return s.projectConfigTabRedirect(ctx, name, "workflow", "", fmt.Errorf("Grok returned no verify commands"))
+	}
+	s.putVerifyDraft(name, config.FormatVerifyCommandsText(cmds))
+	msg := fmt.Sprintf("Suggested 1 verify command for project %q — review and Save to apply", name)
+	if len(cmds) != 1 {
+		msg = fmt.Sprintf("Suggested %d verify commands for project %q — review and Save to apply", len(cmds), name)
+	}
+	return s.projectConfigTabRedirect(ctx, name, "workflow", msg, nil)
+}
+
+func (s *Server) putVerifyDraft(name, text string) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return
+	}
+	s.verifyDraftMu.Lock()
+	defer s.verifyDraftMu.Unlock()
+	if s.verifyDrafts == nil {
+		s.verifyDrafts = make(map[string]string)
+	}
+	s.verifyDrafts[name] = text
+}
+
+// peekVerifyDraft returns a pending draft without clearing it (survives refresh).
+func (s *Server) peekVerifyDraft(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ""
+	}
+	s.verifyDraftMu.Lock()
+	defer s.verifyDraftMu.Unlock()
+	if s.verifyDrafts == nil {
+		return ""
+	}
+	return s.verifyDrafts[name]
+}
+
+func (s *Server) clearVerifyDraft(name string) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return
+	}
+	s.verifyDraftMu.Lock()
+	defer s.verifyDraftMu.Unlock()
+	delete(s.verifyDrafts, name)
 }
 
 // setProjectCapabilityUser saves a roster role select: an explicit template,

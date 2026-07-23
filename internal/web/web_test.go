@@ -182,6 +182,8 @@ func TestPagesRender(t *testing.T) {
 		{"/config/projects/proj/workflow", "name=\"defaultMode\""},
 		{"/config/projects/proj/workflow", "Verify commands"},
 		{"/config/projects/proj/workflow", "name=\"verifyCommands\""},
+		{"/config/projects/proj/workflow", "Suggest with Grok"},
+		{"/config/projects/proj/workflow", "/config/projects/verify/generate"},
 		{"/config/projects/proj/integrations", `id="page-project-config-integrations"`},
 		{"/config/projects/proj/integrations", "Discord guild ID"},
 		{"/config/projects/proj/integrations", "name=\"guildId\""},
@@ -1524,6 +1526,102 @@ func TestProjectConfigPage(t *testing.T) {
 				t.Fatalf("%s missing %q", pg.path, want)
 			}
 		}
+	}
+}
+
+func TestGenerateProjectVerifyDraft(t *testing.T) {
+	srv, cfg, _ := testServer(t)
+	// Seed existing saved commands so we can prove generate does not overwrite config.
+	if err := cfg.SetProjectVerifyCommands("proj", []config.VerifyCommand{
+		{Name: "old", Command: "echo old"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	srv.suggestVerify = func(ctx context.Context, grokBin, model, cwd string, timeout time.Duration) (string, error) {
+		called = true
+		if cwd == "" {
+			t.Fatal("empty cwd")
+		}
+		return "Here you go:\n\n```\nunit | go test ./...\nlint | make lint | 120000\n```\n", nil
+	}
+	h := srv.Handler()
+
+	form := url.Values{"name": {"proj"}}
+	req := httptest.NewRequest(http.MethodPost, "/config/projects/verify/generate", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusSeeOther && w.Code != http.StatusFound {
+		t.Fatalf("generate status=%d body=%s", w.Code, w.Body.String())
+	}
+	if !called {
+		t.Fatal("suggestVerify not called")
+	}
+	loc := w.Header().Get("Location")
+	if !strings.HasPrefix(loc, "/config/projects/proj/workflow?") || !strings.Contains(loc, "ok=") {
+		t.Fatalf("Location=%q", loc)
+	}
+	// Config still has the old saved commands.
+	if vc := cfg.ProjectVerifyCommands("proj"); len(vc) != 1 || vc[0].Name != "old" {
+		t.Fatalf("config mutated before save: %+v", vc)
+	}
+
+	// Workflow page shows the draft in the textarea (and survives refresh).
+	for i := 0; i < 2; i++ {
+		req = httptest.NewRequest(http.MethodGet, "/config/projects/proj/workflow", nil)
+		w = httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("workflow status=%d", w.Code)
+		}
+		body := w.Body.String()
+		if !strings.Contains(body, "unit | go test ./...") || !strings.Contains(body, "make lint") {
+			t.Fatalf("draft missing from page (load %d): %s", i+1, body)
+		}
+		if strings.Contains(body, "echo old") {
+			t.Fatal("page still showing saved commands instead of draft")
+		}
+	}
+
+	// Save the draft → clears pending draft and persists.
+	form = url.Values{
+		"name":           {"proj"},
+		"verifyCommands": {"unit | go test ./...\nlint | make lint | 120000"},
+	}
+	req = httptest.NewRequest(http.MethodPost, "/config/projects/verify", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusSeeOther && w.Code != http.StatusFound {
+		t.Fatalf("save status=%d", w.Code)
+	}
+	vc := cfg.ProjectVerifyCommands("proj")
+	if len(vc) != 2 || vc[0].Name != "unit" || vc[1].TimeoutMs != 120000 {
+		t.Fatalf("saved: %+v", vc)
+	}
+	if srv.peekVerifyDraft("proj") != "" {
+		t.Fatal("draft should clear after save")
+	}
+}
+
+func TestGenerateProjectVerifyError(t *testing.T) {
+	srv, _, _ := testServer(t)
+	srv.suggestVerify = func(ctx context.Context, grokBin, model, cwd string, timeout time.Duration) (string, error) {
+		return "", context.DeadlineExceeded
+	}
+	h := srv.Handler()
+	form := url.Values{"name": {"proj"}}
+	req := httptest.NewRequest(http.MethodPost, "/config/projects/verify/generate", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusSeeOther && w.Code != http.StatusFound {
+		t.Fatalf("status=%d", w.Code)
+	}
+	loc := w.Header().Get("Location")
+	if !strings.Contains(loc, "err=") {
+		t.Fatalf("want err flash: %s", loc)
 	}
 }
 

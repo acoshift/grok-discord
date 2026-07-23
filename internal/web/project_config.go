@@ -223,7 +223,12 @@ func (s *Server) projectConfigPage(ctx *hime.Context) error {
 }
 
 func (s *Server) projectConfigWorkflowPage(ctx *hime.Context) error {
-	return s.projectConfigTab(ctx, "workflow", "project_config_workflow", nil)
+	return s.projectConfigTab(ctx, "workflow", "project_config_workflow", func(d *pageData) {
+		// Pending Grok draft overrides the saved textarea until Save (or a new Suggest).
+		if draft := s.peekVerifyDraft(d.ProjectItem.Name); draft != "" {
+			d.ProjectItem.VerifyCommandsText = draft
+		}
+	})
 }
 
 func (s *Server) projectConfigIntegrationsPage(ctx *hime.Context) error {

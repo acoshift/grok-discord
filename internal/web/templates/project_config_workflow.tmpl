@@ -61,8 +61,12 @@
       <p class="sub" style="margin:0.4rem 0 0; font-size:0.8rem">
         <span class="mono">name | command | timeoutMs?</span> per line (also <span class="mono">name: command</span>) ·
         runs in the session worktree, no model call · <span class="mono">#</span> comments · empty save clears all.
+        <span class="muted">Suggest with Grok</span> inspects the project checkout and fills a draft — Save to apply.
       </p>
-      <div class="form-actions"><button type="submit">Save verify commands</button></div>
+      <div class="form-actions">
+        <button type="submit">Save verify commands</button>
+        <button type="submit" class="btn-secondary" formaction="{{route "config.generateProjectVerify"}}" title="Inspect the project checkout with Grok and draft verify commands (not saved until you Save)">Suggest with Grok</button>
+      </div>
     </form>
   </div>
 </div>
