@@ -1329,6 +1329,11 @@
       flex-wrap: wrap;
       gap: 0.45rem;
       flex-shrink: 0;
+      /* Cap the flex item at the row width: its hypothetical size is all
+         chips on ONE line, and with shrink 0 enough chips (5 on a session
+         with a case + PR) would otherwise push past a phone viewport
+         instead of engaging the internal wrap. */
+      max-width: 100%;
       padding-top: 0.2rem;
     }
     .pr-head-links .btn[aria-disabled="true"] { opacity: 0.55; }
@@ -1872,6 +1877,9 @@
       justify-content: flex-end;
       align-items: center;
       flex-shrink: 0;
+      /* Same phone-viewport cap as .pr-head-links: enough badges must wrap
+         internally, not push the row past the viewport (shrink is 0). */
+      max-width: 100%;
     }
     .case-side a.badge:hover { text-decoration: none; border-color: var(--hover-border); }
     /* Severity picker (case intake form) — same accent scale as the board rows. */
