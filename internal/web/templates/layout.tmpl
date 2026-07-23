@@ -330,6 +330,10 @@
     }
     .nav-links > a.active::before { opacity: 1; }
 
+    /* Mobile section-menu button — the desktop sidebar shows .nav-links as a
+       column, so the button only exists at the ≤920px shell breakpoint. */
+    .nav-toggle { display: none; }
+
     /* Sidebar section caption (global shell: cross-project lead views). */
     .nav-label {
       margin: 0.9rem 0.65rem 0.25rem;
@@ -407,6 +411,11 @@
       box-shadow: var(--shadow-2);
       max-height: 16rem;
       overflow-y: auto;
+      animation: menu-in 0.14s ease;
+    }
+    /* Shared drop-in for the switcher menu and the mobile section menu. */
+    @keyframes menu-in {
+      from { opacity: 0; transform: translateY(-0.3rem); }
     }
     .proj-menu a {
       display: block;
@@ -2133,6 +2142,8 @@
       }
       .brand { flex-shrink: 0; min-width: 0; }
       nav {
+        /* Anchor for the absolutely-positioned section menu panel. */
+        position: relative;
         order: 3;
         flex: 1 1 100%;
         flex-basis: 100%;
@@ -2146,19 +2157,68 @@
         gap: 0.35rem;
         padding-bottom: 0.1rem;
       }
-      /* Scroll only the tab strip — not the project switcher (its menu would clip). */
-      .nav-links {
-        flex: 1 1 0;
+      nav[data-nav-open] { z-index: 60; }
+      /* Section menu: a "current section ▾" button (sibling of the project
+         switcher) opening a two-column panel — replaces the old horizontal
+         tab strip whose 11 targets forced tiny taps and long scrolling. */
+      .nav-toggle {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        flex: 1 1 auto;
         min-width: 0;
-        flex-direction: row;
-        overflow-x: auto;
-        -webkit-overflow-scrolling: touch;
-        scrollbar-width: none;
-        gap: 0.25rem;
+        padding: 0.32rem 0.55rem;
+        border: 1px solid var(--border-strong);
+        border-radius: 0.55rem;
+        background: var(--surface);
+        color: var(--text);
+        font: inherit;
+        font-size: 0.9rem;
+        font-weight: 600;
+        text-align: left;
+        cursor: pointer;
+        transition: border-color 0.12s ease;
       }
-      .nav-links::-webkit-scrollbar { display: none; }
-      .nav-links > a { padding: 0.38rem 0.7rem; font-size: 0.86rem; flex-shrink: 0; }
-      .nav-label { display: none; }
+      .nav-toggle::after {
+        content: "";
+        margin-left: auto;
+        width: 1rem;
+        height: 1rem;
+        flex-shrink: 0;
+        background: var(--chev) center / contain no-repeat;
+        transition: transform 0.15s ease;
+      }
+      nav[data-nav-open] .nav-toggle { border-color: var(--focus-border); }
+      nav[data-nav-open] .nav-toggle::after { transform: rotate(180deg); }
+      .nav-links {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: calc(100% + 0.35rem);
+        z-index: 60;
+        display: none;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.2rem;
+        padding: 0.4rem;
+        background: var(--surface);
+        border: 1px solid var(--border-strong);
+        border-radius: var(--radius);
+        box-shadow: var(--shadow-2);
+      }
+      nav[data-nav-open] .nav-links {
+        display: grid;
+        animation: menu-in 0.14s ease;
+      }
+      .nav-links > a {
+        padding: 0.6rem 0.65rem;
+        font-size: 0.9rem;
+        min-width: 0;
+      }
+      .nav-links > a.active { box-shadow: none; background: var(--surface-l2); }
+      .nav-label {
+        grid-column: 1 / -1;
+        margin: 0.4rem 0.65rem 0.1rem;
+      }
       .proj-switch {
         margin: 0;
         flex: 0 1 auto;
@@ -2254,7 +2314,12 @@
           </div>
         </details>
         {{end}}
-        <div class="nav-links">
+        {{/* Mobile-only section menu button (desktop shows .nav-links as the
+             sidebar column and hides this). Label mirrors the active nav link
+             so the closed state reads "where am I"; the oob #side-nav swap on
+             every boosted navigation re-renders it closed with a fresh label. */}}
+        <button type="button" class="nav-toggle" aria-expanded="false" aria-controls="nav-links">{{if .IsDashboard}}Projects{{else if .IsOverview}}Overview{{else if .IsStart}}Start task{{else if .IsShip}}Ship{{else if .IsCases}}Cases{{else if .IsReviews}}Reviews{{else if .IsIssues}}Issues{{else if .IsLinear}}Linear{{else if .IsCommits}}Commits{{else if .IsSessions}}Sessions{{else if .IsWorktrees}}Worktrees{{else if .IsConfig}}{{if .NavProject}}Settings{{else}}Config{{end}}{{else}}Menu{{end}}</button>
+        <div class="nav-links" id="nav-links">
         {{if .NavProject}}
         <a href="/projects/{{.NavProject}}" data-icon="overview" class="{{if .IsOverview}}active{{end}}">Overview</a>
         <a href="/projects/{{.NavProject}}/start" data-icon="start" class="{{if .IsStart}}active{{end}}">Start task</a>
@@ -2660,6 +2725,14 @@
         var href = a.getAttribute("href") || "";
         a.classList.toggle("active", !!navActiveFor(path, href));
       });
+      // History restores swap only #live-root, so the server-rendered section
+      // label (and open state) on the mobile menu button would go stale.
+      navMenuSet(false);
+      var btn = document.querySelector("#side-nav .nav-toggle");
+      if (btn) {
+        var active = document.querySelector(".nav-links > a.active");
+        btn.textContent = active ? active.textContent : "Menu";
+      }
     }
     document.body.addEventListener("htmx:pushedIntoHistory", updateNavActive);
     document.body.addEventListener("htmx:replacedInHistory", updateNavActive);
@@ -2687,6 +2760,38 @@
       document.querySelectorAll("details.proj-switch[open]").forEach(function (d) {
         if (!d.contains(e.target)) d.removeAttribute("open");
       });
+    });
+
+    // Mobile section menu (.nav-toggle → .nav-links panel). Delegated so the
+    // handlers survive the oob #side-nav swap; each swap re-renders the menu
+    // closed, so state never needs syncing after navigation.
+    function navMenuSet(open) {
+      var nav = document.getElementById("side-nav");
+      if (!nav) return;
+      nav.toggleAttribute("data-nav-open", open);
+      var btn = nav.querySelector(".nav-toggle");
+      if (btn) btn.setAttribute("aria-expanded", open ? "true" : "false");
+    }
+    document.addEventListener("click", function (e) {
+      var nav = document.getElementById("side-nav");
+      if (!nav) return;
+      if (e.target.closest(".nav-toggle")) {
+        navMenuSet(!nav.hasAttribute("data-nav-open"));
+        return;
+      }
+      if (!nav.hasAttribute("data-nav-open")) return;
+      // Close on outside click, on picking a section (before the boosted swap
+      // lands), and when opening the project switcher (also inside #side-nav).
+      if (!nav.contains(e.target) ||
+          e.target.closest(".nav-links a") ||
+          e.target.closest(".proj-switch")) {
+        navMenuSet(false);
+      }
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.key !== "Escape") return;
+      var nav = document.getElementById("side-nav");
+      if (nav && nav.hasAttribute("data-nav-open")) navMenuSet(false);
     });
 
     // Per-path scroll for boosted navigations (e.g. history detail → list via
