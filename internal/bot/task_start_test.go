@@ -47,8 +47,6 @@ func testBotWithData(t *testing.T) (*Bot, string) {
 	return New(cfg, store, hist), proj
 }
 
-func boolPtr(v bool) *bool { return &v }
-
 func TestDiscordReadyAfterRegister(t *testing.T) {
 	b, _ := testBotWithData(t)
 	if b.DiscordReady() {

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/gorilla/websocket"
 )
 
 // Gateway health: discordgo already heartbeats on the websocket. That is the
@@ -69,7 +70,11 @@ func (b *Bot) checkGatewayHealth() {
 		age := now.Sub(lastAck)
 		log.Printf("gateway: heartbeat ACK stale age=%s dataReady=%v — forcing reconnect", age.Round(time.Second), dataReady)
 		b.forceGatewayReconnect(s, "stale heartbeat ACK")
+		return
 	}
+	// Healthy heartbeat: event delivery was complete up to the last ACK.
+	// This watermark bounds the catch-up sweep window after a reconnect.
+	b.advanceCoverage(lastAck)
 }
 
 // gatewayHeartbeatStale reports whether lastAck is older than maxAge.
@@ -103,7 +108,10 @@ func (b *Bot) forceGatewayReconnect(s *discordgo.Session, reason string) {
 	}
 
 	log.Printf("gateway: force reconnect (%s)", reason)
-	if err := s.Close(); err != nil {
+	// Close code 1012 (service restart) keeps the session resumable server-side
+	// — plain Close() sends 1000, which makes Discord invalidate the session and
+	// forfeit event replay on the next Open.
+	if err := s.CloseWithCode(websocket.CloseServiceRestart); err != nil {
 		// Close can fail if already closed; still try Open.
 		log.Printf("gateway: close: %v", err)
 	}

@@ -106,6 +106,16 @@ type Bot struct {
 	threadAPI   threadAPI          // tests inject; nil → wrap discord
 	reconnectMu sync.Mutex         // serializes forced gateway reconnects
 
+	// Catch-up sweep state (catchup.go).
+	coverageMs      atomic.Int64 // unix ms of last moment gateway coverage was believed complete
+	catchupMu       sync.Mutex   // single-flight sweep
+	catchupRerun    atomic.Bool  // trigger arrived mid-sweep → run once more
+	handledMu       sync.Mutex
+	handledSet      map[string]struct{} // processed message IDs (bounded by handledQ)
+	handledQ        []string
+	catchupFetch    func(channelID, afterID string) ([]*discordgo.Message, error) // tests inject
+	catchupDispatch func(s *discordgo.Session, m *discordgo.MessageCreate)        // tests inject
+
 	// Per main-checkout path locks for direct-to-primary ship (abs+symlink key).
 	shipMu    sync.Mutex
 	shipLocks map[string]*sync.Mutex
@@ -473,6 +483,7 @@ var errQueueFull = ErrQueueFull
 func (b *Bot) Register(s *discordgo.Session) {
 	b.setDiscord(s)
 	s.AddHandler(b.onReady)
+	s.AddHandler(b.onResumed)
 	s.AddHandler(b.onMessage)
 	s.AddHandler(b.onInteraction)
 	// MESSAGE CONTENT is a privileged intent (Developer Portal → Bot).
@@ -499,6 +510,9 @@ func (b *Bot) onReady(s *discordgo.Session, r *discordgo.Ready) {
 	b.startPRStatusPoller()
 	b.startBoardDigest(s)
 	b.startGatewayWatch()
+	// READY after a re-IDENTIFY means the resume failed and the gap was not
+	// replayed — recover it over REST (no-op on first READY).
+	go b.catchupSweep(s, "ready")
 }
 
 func (b *Bot) onMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
@@ -516,6 +530,12 @@ func (b *Bot) onMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 		return
 	}
 	if !mentionsUser(m, s.State.User.ID) {
+		return
+	}
+	// RESUME replay and the catch-up sweep can redeliver a message; first
+	// delivery wins.
+	if !b.markMessageHandled(m.ID) {
+		log.Printf("msg: duplicate delivery skipped id=%s", m.ID)
 		return
 	}
 
@@ -2378,6 +2398,8 @@ func truncate(s string, n int) string {
 	}
 	return s[:n] + "…"
 }
+
+func boolPtr(v bool) *bool { return &v }
 
 func mentionsUser(m *discordgo.MessageCreate, userID string) bool {
 	for _, u := range m.Mentions {
