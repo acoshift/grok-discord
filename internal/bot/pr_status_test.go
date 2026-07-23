@@ -168,6 +168,68 @@ func TestPrViewSelectorPrefersURL(t *testing.T) {
 
 // Regression: cleanup must not run while the job is still held (executeTask path),
 // and must run once the thread is idle (finishRun → tryCleanupTerminalPR).
+// Cases outlive eng PRs: terminal cleanup must not erase Mode=case (board + close path).
+func TestCleanupWhenAllPRsDoneKeepsCaseSession(t *testing.T) {
+	dir := t.TempDir()
+	store, err := sessionstore.New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{DataDir: dir}
+	b := New(cfg, store, nil)
+	threadID := "case-thread-1"
+	if err := store.Set(threadID, sessionstore.Entry{
+		SessionID:     "s-case",
+		Project:       "homeconnect",
+		Mode:          "case",
+		Phase:         sessionstore.PhaseShipping,
+		CustomerTitle: "dashboard.stats timeout",
+		Cwd:           filepath.Join(dir, "wt"),
+		WorktreeBranch: "grokwork/" + threadID,
+		MainCwd:       dir,
+		PRNumber:      99,
+		PRState:       "MERGED",
+		PRURL:         "https://github.com/o/r/pull/99",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := b.cleanupWhenAllPRsDone(threadID); err != nil {
+		t.Fatalf("cleanup: %v", err)
+	}
+	e, ok := store.Get(threadID)
+	if !ok {
+		t.Fatal("case session deleted after terminal PR cleanup")
+	}
+	if e.Mode != "case" || e.Phase != sessionstore.PhaseShipping {
+		t.Fatalf("case fields lost: mode=%q phase=%q", e.Mode, e.Phase)
+	}
+	if e.CustomerTitle != "dashboard.stats timeout" {
+		t.Fatalf("title=%q", e.CustomerTitle)
+	}
+	// Worktree pointers cleared so UI does not claim a removed tree.
+	if e.Cwd != "" || e.WorktreeBranch != "" {
+		t.Fatalf("want worktree cleared, got cwd=%q branch=%q", e.Cwd, e.WorktreeBranch)
+	}
+	// Non-case still deletes.
+	fixID := "fix-thread-1"
+	if err := store.Set(fixID, sessionstore.Entry{
+		SessionID: "s-fix",
+		Project:   "p",
+		PRNumber:  1,
+		PRState:   "MERGED",
+		PRURL:     "https://github.com/o/r/pull/1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.cleanupWhenAllPRsDone(fixID); err != nil {
+		t.Fatalf("fix cleanup: %v", err)
+	}
+	if _, ok := store.Get(fixID); ok {
+		t.Fatal("non-case session should still be deleted")
+	}
+}
+
 func TestTryCleanupTerminalPRDefersWhenBusy(t *testing.T) {
 	dir := t.TempDir()
 	store, err := sessionstore.New(dir)

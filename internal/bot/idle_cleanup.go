@@ -204,10 +204,24 @@ func (b *Bot) pruneIdleWorktrees(now time.Time, ttl time.Duration) int {
 }
 
 func (b *Bot) removeWorktreeCandidate(c idleCandidate, reason string) error {
+	// Open cases stay on the board until /close (or reset). Idle TTL may still
+	// reclaim their worktree/branch, but must not erase the case session.
+	keepSession := false
+	if c.hasSession && b.sessions != nil {
+		if e, ok := b.sessions.Get(c.threadID); ok && e.IsCase() && !e.IsCaseClosed() {
+			keepSession = true
+		}
+	}
+
 	if c.mainCwd == "" {
-		// Still drop session if present so the UI can clear the row.
-		if c.hasSession {
+		// Still drop session if present so the UI can clear the row (non-case only).
+		if c.hasSession && !keepSession {
 			_ = b.sessions.Delete(c.threadID)
+		} else if keepSession {
+			_, _, _ = b.sessions.Patch(c.threadID, func(ent *sessionstore.Entry) {
+				ent.Cwd = ""
+				ent.WorktreeBranch = ""
+			})
 		}
 		return fmt.Errorf("no main repo path for project %q", c.project)
 	}
@@ -227,6 +241,14 @@ func (b *Bot) removeWorktreeCandidate(c idleCandidate, reason string) error {
 	} else {
 		log.Printf("worktree: removed (%s) thread=%s project=%s branch=%s last=%s",
 			reason, c.threadID, c.project, c.branch, formatLast(c.last))
+	}
+	if keepSession {
+		_, _, _ = b.sessions.Patch(c.threadID, func(ent *sessionstore.Entry) {
+			ent.Cwd = ""
+			ent.WorktreeBranch = ""
+		})
+		log.Printf("idle-worktree: open case session kept thread=%s reason=%s", c.threadID, reason)
+		return err
 	}
 	if delErr := b.sessions.Delete(c.threadID); delErr != nil {
 		log.Printf("warn: worktree session delete thread=%s: %v", c.threadID, delErr)

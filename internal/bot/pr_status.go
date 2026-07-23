@@ -468,6 +468,9 @@ func (b *Bot) upsertPRStatusMessage(s *discordgo.Session, threadID, msgID, conte
 }
 
 // cleanupWhenAllPRsDone removes worktree + session after every tracked PR is terminal.
+// Open (and closed) case sessions are kept: Mode=case is a support lifecycle unit
+// that must survive eng shipping so customer-update / close remain on the board.
+// Redeploy re-runs the PR poller; without this guard, a merged case PR wipes the case.
 func (b *Bot) cleanupWhenAllPRsDone(threadID string) error {
 	if b.isThreadBusy(threadID) {
 		return fmt.Errorf("thread busy")
@@ -480,6 +483,8 @@ func (b *Bot) cleanupWhenAllPRsDone(threadID string) error {
 	if e.HasOpenPR() {
 		return fmt.Errorf("open PRs remain")
 	}
+	// Cases: free the worktree/branch for disk hygiene, never drop the session entry.
+	keepSession := e.IsCase()
 
 	mainCwd := e.MainCwd
 	if mainCwd == "" {
@@ -518,6 +523,17 @@ func (b *Bot) cleanupWhenAllPRsDone(threadID string) error {
 		cancel()
 	}
 
+	if keepSession {
+		// Clear worktree pointers so the board does not claim an on-disk tree that we removed.
+		_, _, _ = b.sessions.Patch(threadID, func(ent *sessionstore.Entry) {
+			ent.Cwd = ""
+			ent.WorktreeBranch = ""
+			// Keep MainCwd for future re-ensure / PR view.
+		})
+		log.Printf("pr-status: case session kept after all PRs terminal thread=%s count=%d phase=%s",
+			threadID, len(e.PRs), e.CasePhase())
+		return nil
+	}
 	if delErr := b.sessions.Delete(threadID); delErr != nil {
 		return delErr
 	}

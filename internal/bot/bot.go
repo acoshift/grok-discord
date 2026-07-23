@@ -851,16 +851,27 @@ func (b *Bot) resolveRunCwd(ctx context.Context, proj projectRef, threadID strin
 
 	opts := b.ensureOptsForUnit(threadID)
 	// Direct-to-primary sessions never track PRs for cleanup; skip gh pr list.
+	// Cases also skip session-delete cleanup (support lifecycle outlives the PR).
 	skipPRCleanup := false
-	if e, ok := b.sessions.Get(threadID); ok && e.IsDirectShip() {
-		skipPRCleanup = true
+	isCase := false
+	if e, ok := b.sessions.Get(threadID); ok {
+		if e.IsDirectShip() {
+			skipPRCleanup = true
+		}
+		isCase = e.IsCase()
 	}
 	if !skipPRCleanup {
 		if cleaned, state, cErr := gitworktree.CleanupIfPRDoneWith(ctx, proj.Cwd, b.cfg.DataDir, proj.Name, threadID, opts); cErr != nil {
 			log.Printf("warn: worktree PR cleanup check thread=%s: %v", threadID, cErr)
 		} else if cleaned {
 			log.Printf("task: cleaned worktree after PR %s thread=%s", state, threadID)
-			if delErr := b.sessions.Delete(threadID); delErr != nil {
+			if isCase {
+				_, _, _ = b.sessions.Patch(threadID, func(ent *sessionstore.Entry) {
+					ent.Cwd = ""
+					ent.WorktreeBranch = ""
+				})
+				log.Printf("task: case session kept after PR cleanup thread=%s", threadID)
+			} else if delErr := b.sessions.Delete(threadID); delErr != nil {
 				log.Printf("warn: session delete after PR cleanup thread=%s: %v", threadID, delErr)
 			}
 		}
