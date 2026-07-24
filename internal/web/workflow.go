@@ -761,4 +761,3 @@ func (s *Server) resolveSessionDiffCwd(ent sessionstore.Entry, threadID string) 
 	}
 	return "", project
 }
-

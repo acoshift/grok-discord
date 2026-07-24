@@ -14,8 +14,8 @@ import (
 
 func TestConfigMutateWritesAuditAuthOff(t *testing.T) {
 	srv, cfg, _ := testServer(t)
-	form := url.Values{"section": {"worktree"}, "worktreeIdleTTLDays": {"14"}}
-	req := httptest.NewRequest(http.MethodPost, "/config/settings", strings.NewReader(form.Encode()))
+	form := url.Values{"worktreeIdleTTLDays": {"14"}}
+	req := httptest.NewRequest(http.MethodPost, "/config/worktrees", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, req)

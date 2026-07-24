@@ -36,13 +36,13 @@ func testServer(t *testing.T) (*Server, *config.Config, string) {
 		Projects: config.ProjectsMap{
 			"proj": {Path: proj, AllowedUserIDs: []string{"u0"}},
 		},
-		Channels:        map[string]string{"ch": "proj"},
-		GrokBin:         "grok",
-		MaxTurns:        40,
-		TimeoutMs:       1000,
-		HTTPListen:      "127.0.0.1:0",
-		ConfigPath:      cfgPath,
-		DataDir:         filepath.Join(dir, "data"),
+		Channels:   map[string]string{"ch": "proj"},
+		GrokBin:    "grok",
+		MaxTurns:   40,
+		TimeoutMs:  1000,
+		HTTPListen: "127.0.0.1:0",
+		ConfigPath: cfgPath,
+		DataDir:    filepath.Join(dir, "data"),
 	}
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
@@ -157,17 +157,42 @@ func TestPagesRender(t *testing.T) {
 		{"/projects/proj/cases", `id="case-pipeline"`},
 		{"/projects/proj/sessions", `id="page-sessions"`},
 		{"/projects/proj/worktrees", `id="page-worktrees"`},
+		// Config hub: grouped drill-in rows; sections live on focused pages.
 		{"/config", `id="page-config"`},
-		{"/config", `id="bot-invite"`},
-		{"/config", "discord.com/oauth2/authorize"},
-		{"/config", "Pin Messages"},
-		{"/config", "Open / re-authorize"},
-		{"/config", "424242424242424242"},
-		{"/config", "Default Discord guild"},
+		{"/config", `href="/config/bot"`},
+		{"/config", `href="/config/channels"`},
+		{"/config", `href="/config/github-identities"`},
+		{"/config", `href="/config/run"`},
+		{"/config", `href="/config/risky"`},
+		{"/config", `href="/config/board"`},
+		{"/config", `href="/config/ci"`},
+		{"/config", `href="/config/pr-links"`},
+		{"/config", `href="/config/worktrees"`},
+		{"/config", `href="/config/projects/new"`},
+		{"/config", `action="/config/resume"`},
 		{"/config", `href="/config/projects/proj"`},
-		{"/config", `id="github-attribution"`},
-		{"/config", "Discord user → GitHub login"},
-		{"/config", `id="github-identity-form"`},
+		{"/config/bot", `id="page-config-bot"`},
+		{"/config/bot", `id="bot-invite"`},
+		{"/config/bot", "discord.com/oauth2/authorize"},
+		{"/config/bot", "Pin Messages"},
+		{"/config/bot", "Open / re-authorize"},
+		{"/config/bot", "424242424242424242"},
+		{"/config/bot", "Default Discord guild"},
+		{"/config/channels", `id="page-config-channels"`},
+		{"/config/channels", `id="live-config-channels"`},
+		{"/config/github-identities", `id="page-config-identities"`},
+		{"/config/github-identities", `id="github-attribution"`},
+		{"/config/github-identities", "Discord user → GitHub login"},
+		{"/config/github-identities", `id="github-identity-form"`},
+		{"/config/run", `id="page-config-run"`},
+		{"/config/run", `name="maxTurns"`},
+		{"/config/worktrees", `id="page-config-worktrees"`},
+		{"/config/worktrees", `name="worktreeIdleTTLDays"`},
+		{"/config/board", `id="page-config-board"`},
+		{"/config/ci", `id="page-config-ci"`},
+		{"/config/pr-links", `id="page-config-prlinks"`},
+		{"/config/risky", `id="page-config-risky"`},
+		{"/config/projects/new", `id="page-config-project-new"`},
 		// Per-project settings: four sub-tab pages (Access is the default).
 		{"/config/projects/proj", `id="page-project-config"`},
 		{"/config/projects/proj", `id="project-config-tabs"`},
@@ -1134,13 +1159,20 @@ func TestConfigAddsPersist(t *testing.T) {
 	h.ServeHTTP(w, req)
 	body := w.Body.String()
 	for _, want := range []string{
-		"added", newProj, "ch-added", "Remove", "Add channel map",
-		"Grok run limits", "maxTurns", "timeoutMs",
-		"Worktrees", "worktreeIdleTTLDays", "worktreeDir", "Crash-safe active runs", "resumeActiveRuns", "CI triage", "autoFixCI",
-		"Discord PR links", "discordPRLink", "Completion risk paths",
+		"added", newProj, "Run limits", "Crash-safe active runs", "resumeActiveRuns",
+		"CI triage", "Discord PR links", "Completion risk paths", "Channel map",
 	} {
 		if !strings.Contains(body, want) {
-			t.Fatalf("config page missing %q", want)
+			t.Fatalf("config hub missing %q", want)
+		}
+	}
+	req = httptest.NewRequest(http.MethodGet, "/config/channels", nil)
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	chBody := w.Body.String()
+	for _, want := range []string{"ch-added", "Remove", "Add channel map"} {
+		if !strings.Contains(chBody, want) {
+			t.Fatalf("channels page missing %q", want)
 		}
 	}
 	req = httptest.NewRequest(http.MethodGet, "/config/projects/proj", nil)
@@ -1154,8 +1186,7 @@ func TestConfigAddsPersist(t *testing.T) {
 	}
 
 	// Settings: Grok run limits
-	reqRun := httptest.NewRequest(http.MethodPost, "/config/settings", strings.NewReader(url.Values{
-		"section":   {"run"},
+	reqRun := httptest.NewRequest(http.MethodPost, "/config/run", strings.NewReader(url.Values{
 		"maxTurns":  {"55"},
 		"timeoutMs": {"1200000"},
 	}.Encode()))
@@ -1171,8 +1202,7 @@ func TestConfigAddsPersist(t *testing.T) {
 
 	// Settings: worktree dir + idle TTL
 	customWT := filepath.Join(t.TempDir(), "custom-worktrees")
-	reqTTL := httptest.NewRequest(http.MethodPost, "/config/settings", strings.NewReader(url.Values{
-		"section":             {"worktree"},
+	reqTTL := httptest.NewRequest(http.MethodPost, "/config/worktrees", strings.NewReader(url.Values{
 		"worktreeIdleTTLDays": {"14"},
 		"worktreeDir":         {customWT},
 	}.Encode()))
@@ -1193,8 +1223,7 @@ func TestConfigAddsPersist(t *testing.T) {
 	}
 
 	// Settings: CI triage
-	reqCI := httptest.NewRequest(http.MethodPost, "/config/settings", strings.NewReader(url.Values{
-		"section":      {"ci"},
+	reqCI := httptest.NewRequest(http.MethodPost, "/config/ci", strings.NewReader(url.Values{
 		"autoFixCI":    {"1"},
 		"autoFixCIMax": {"3"},
 	}.Encode()))
@@ -1209,10 +1238,9 @@ func TestConfigAddsPersist(t *testing.T) {
 	}
 
 	// Settings: risky globs custom
-	reqRisk := httptest.NewRequest(http.MethodPost, "/config/settings", strings.NewReader(url.Values{
-		"section":              {"risky"},
-		"riskyPathGlobs":       {"**/auth/**\n**/deploy/**"},
-		"riskyPathUseDefault":  {""},
+	reqRisk := httptest.NewRequest(http.MethodPost, "/config/risky", strings.NewReader(url.Values{
+		"riskyPathGlobs":      {"**/auth/**\n**/deploy/**"},
+		"riskyPathUseDefault": {""},
 	}.Encode()))
 	reqRisk.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	wRisk := httptest.NewRecorder()
@@ -1225,8 +1253,7 @@ func TestConfigAddsPersist(t *testing.T) {
 	}
 
 	// Settings: team board
-	reqBoard := httptest.NewRequest(http.MethodPost, "/config/settings", strings.NewReader(url.Values{
-		"section":            {"board"},
+	reqBoard := httptest.NewRequest(http.MethodPost, "/config/board", strings.NewReader(url.Values{
 		"boardStaleDays":     {"7"},
 		"boardDigestChannel": {"999888777"},
 	}.Encode()))
@@ -1241,8 +1268,7 @@ func TestConfigAddsPersist(t *testing.T) {
 	}
 
 	// Settings: Discord PR link mode
-	reqPRLink := httptest.NewRequest(http.MethodPost, "/config/settings", strings.NewReader(url.Values{
-		"section":       {"discordPRLink"},
+	reqPRLink := httptest.NewRequest(http.MethodPost, "/config/pr-links", strings.NewReader(url.Values{
 		"discordPRLink": {"web"},
 	}.Encode()))
 	reqPRLink.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -1311,9 +1337,9 @@ func TestConfigAddsPersist(t *testing.T) {
 	}
 	var disk struct {
 		Projects       config.ProjectsMap `json:"projects"`
-		Channels       map[string]string `json:"channels"`
-		AllowedUserIDs []string          `json:"allowedUserIds"`
-		AllowedRoleIDs []string          `json:"allowedRoleIds"`
+		Channels       map[string]string  `json:"channels"`
+		AllowedUserIDs []string           `json:"allowedUserIds"`
+		AllowedRoleIDs []string           `json:"allowedRoleIds"`
 	}
 	if err := json.Unmarshal(raw, &disk); err != nil {
 		t.Fatal(err)
@@ -1488,7 +1514,7 @@ func TestProjectConfigPage(t *testing.T) {
 
 	// Verify commands.
 	form = url.Values{
-		"name": {"proj"},
+		"name":           {"proj"},
 		"verifyCommands": {"unit | go test ./...\nlint | make lint | 300000"},
 	}
 	req = httptest.NewRequest(http.MethodPost, "/config/projects/verify", strings.NewReader(form.Encode()))

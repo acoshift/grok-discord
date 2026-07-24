@@ -2223,60 +2223,104 @@
     }
     .chip button:hover { color: var(--danger); background: var(--danger-bg); }
 
-    /* ── In-page anchor nav (Config) ─────────────────────────────────── */
-    .config-page-header {
-      position: sticky;
-      top: 0;
-      z-index: 30;
-      margin: -0.35rem 0 1.25rem;
-      padding: 0.35rem 0 0.85rem;
-      background: var(--bg);
-      border-bottom: 1px solid var(--border);
-      box-shadow: 0 0.65rem 0.85rem -0.65rem hsl(var(--black) / 10%);
+    /* ── Config hub: grouped drill-in rows (Settings-style) ──────────
+       Each row shows its current value and opens a focused sub-page.
+       Shared by desktop (two-column hub) and phone (single column). */
+    .cfg-hub {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr));
+      gap: 0 1.6rem;
+      max-width: 62rem;
+      align-items: start;
     }
-    .config-page-header h1 { margin-bottom: 0.2rem; }
-    .config-page-header .sub { margin-bottom: 0.75rem; }
-    /* Reset shell `nav` (column sidebar) — section chips are a horizontal wrap. */
-    .anchor-nav {
-      display: flex;
-      flex-direction: row;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: 0.4rem;
-      margin: 0;
-    }
-    .anchor-nav a {
-      display: inline-flex;
-      align-items: center;
-      flex: 0 0 auto;
-      padding: 0.24rem 0.7rem;
-      border-radius: 999px;
-      border: 1px solid var(--border);
-      background: var(--surface);
-      color: var(--muted);
-      font-size: 0.8rem;
-      font-weight: 500;
-      text-decoration: none;
-      transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
-    }
-    .anchor-nav a:hover {
-      color: var(--text);
-      border-color: var(--hover-border);
-      text-decoration: none;
-    }
-    .anchor-nav a.active {
-      color: var(--text);
-      background: var(--surface-l2);
-      border-color: var(--hover-border);
-      box-shadow: var(--shadow-1);
+    .drill-cap {
+      margin: 1.4rem 0.25rem 0.5rem;
+      font-size: 0.72rem;
       font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted-soft);
     }
-    /* Sticky header covers ~title+sub+pills; keep in-page jumps readable. */
-    .config-page .section[id],
-    .config-page .card[id],
-    .config-page [id="access"] {
-      scroll-margin-top: 9.5rem;
+    .drill-group {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-1);
+      overflow: hidden;
     }
+    .drill {
+      display: flex;
+      align-items: center;
+      gap: 0.8rem;
+      min-height: 3.4rem;
+      padding: 0.62rem 1rem;
+      color: var(--text);
+      text-decoration: none;
+    }
+    .drill + .drill { border-top: 1px solid var(--border); }
+    a.drill:hover { background: var(--surface-l1); text-decoration: none; }
+    .drill-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.12rem; }
+    .drill-t { font-size: 0.92rem; font-weight: 550; letter-spacing: -0.01em; }
+    .drill-s { font-size: 0.76rem; color: var(--muted); overflow-wrap: anywhere; }
+    .drill-s.mono { font-size: 0.72rem; }
+    .drill-v { flex-shrink: 0; font-size: 0.82rem; color: var(--muted); text-align: right; }
+    /* Disclosure chevron on navigable rows only. */
+    a.drill::after {
+      content: "";
+      flex-shrink: 0;
+      width: 0.5rem;
+      height: 0.5rem;
+      border-right: 2px solid var(--muted-soft);
+      border-top: 2px solid var(--muted-soft);
+      transform: rotate(45deg);
+    }
+    .drill .proj-mark { flex-shrink: 0; }
+    .drill-toggle { margin: 0; display: flex; }
+    /* iOS-style switch: a checkbox with a sliding knob (data-autosubmit
+       posts the form on flip; unchecked submits an empty value = off). */
+    .switch {
+      position: relative;
+      display: inline-flex;
+      width: 2.9rem;
+      height: 1.75rem;
+      cursor: pointer;
+    }
+    .switch input {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      margin: 0;
+      cursor: pointer;
+    }
+    .switch .knob {
+      position: absolute;
+      inset: 0;
+      border-radius: 999px;
+      background: var(--surface-l2);
+      border: 1px solid var(--border-strong);
+      transition: background 0.15s ease, border-color 0.15s ease;
+    }
+    .switch .knob::after {
+      content: "";
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: calc(1.75rem - 6px);
+      height: calc(1.75rem - 6px);
+      border-radius: 50%;
+      background: var(--surface);
+      box-shadow: 0 1px 3px hsl(0 0% 0% / 25%);
+      transition: transform 0.15s ease;
+    }
+    .switch input:checked + .knob {
+      background: var(--ok);
+      border-color: var(--ok);
+    }
+    .switch input:checked + .knob::after {
+      transform: translateX(1.15rem);
+      background: #fff;
+    }
+    .switch input:focus-visible + .knob { outline: 2px solid var(--focus-border); outline-offset: 1px; }
 
     /* ── GitHub attribution map (config hub) ───────────────────────────
        Signature: a thin identity bridge (Discord snowflake → @login) that
@@ -2467,17 +2511,15 @@
     a[data-pager-next]:hover .pager-chevron { translate: 0.14em -0.02em; }
 
     /* ── Conversation turns ──────────────────────────────────────────── */
-    .turns { display: flex; flex-direction: column; gap: 1.1rem; }
-    .turn {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-lg);
-      padding: 0.9rem 1rem 1rem;
-      box-shadow: var(--shadow-1);
-    }
+    /* Conversation layout: user prompts as right-aligned ink bubbles, Grok
+       replies as full-width cards — the turn article is a transparent flex
+       column, not a card. */
+    .turns { display: flex; flex-direction: column; gap: 1.45rem; }
+    .turn { display: flex; flex-direction: column; }
     .turn-meta {
       display: flex; flex-wrap: wrap; gap: 0.5rem 0.85rem;
-      align-items: center; margin-bottom: 0.75rem; font-size: 0.85rem;
+      align-items: center; margin-bottom: 0.15rem; font-size: 0.8rem;
+      color: var(--muted);
     }
     .turn-error {
       display: flex;
@@ -2506,7 +2548,7 @@
       opacity: 0.85;
     }
     .turn-error-msg { word-break: break-word; }
-    .bubble { margin-top: 0.55rem; }
+    .bubble { margin-top: 0.55rem; display: flex; flex-direction: column; min-width: 0; }
     .bubble-label {
       font-size: 0.7rem;
       text-transform: uppercase;
@@ -2522,12 +2564,12 @@
       font-family: var(--mono);
       font-size: 0.85rem;
       line-height: 1.5;
-      background: var(--surface-l1);
+      background: var(--surface);
       border: 1px solid var(--border);
-      border-left-width: 3px;
-      border-radius: var(--radius);
-      padding: 0.7rem 0.85rem;
+      border-radius: var(--radius-lg);
+      padding: 0.75rem 0.95rem;
       color: var(--text);
+      box-shadow: var(--shadow-1);
     }
     /* GFM turn bodies: proportional type, normal flow; keep bubble chrome. */
     .bubble-body.md {
@@ -2536,18 +2578,109 @@
       font-size: 0.9rem;
       line-height: 1.6;
     }
+    /* User prompt: ink bubble on the right, self-evidently "you" (label off). */
+    .bubble.user { align-self: flex-end; max-width: min(85%, 36rem); }
+    .bubble.user .bubble-label { display: none; }
     .bubble.user .bubble-body {
-      background: hsl(var(--blue-500) / 6%);
-      border-color: hsl(var(--blue-500) / 18%);
-      border-left-color: hsl(var(--blue-500) / 55%);
+      background: var(--text);
+      color: var(--bg);
+      border: none;
+      box-shadow: none;
+      border-radius: 1.05rem;
+      border-bottom-right-radius: 0.35rem;
+      padding: 0.6rem 0.95rem;
     }
-    .bubble.assistant .bubble-body {
-      background: var(--surface-l1);
-      border-color: var(--border-strong);
-      border-left-color: var(--muted-soft);
+    .bubble.user .bubble-body a { color: inherit; text-decoration: underline; }
+    .bubble.user .bubble-body code,
+    .bubble.user .bubble-body pre {
+      /* Overlay tinted with the bubble's own text color so it reads on the
+         ink bubble in light mode AND the inverted (white) bubble in dark. */
+      background: color-mix(in srgb, var(--bg) 16%, transparent);
+      border-color: transparent;
+      color: inherit;
     }
+    .bubble.assistant { align-self: stretch; }
     .turn-live .bubble.assistant .bubble-body {
-      border-left-color: var(--accent, hsl(var(--blue-500) / 70%));
+      border-color: hsl(var(--blue-500) / 30%);
+    }
+
+    /* ── Session composer (docked conversation input) ────────────────
+       Desktop: sticky at the bottom of the conversation column with a soft
+       fade so turns scroll under it. Phone overrides below pin it to the
+       viewport bottom in place of the tab bar. */
+    .sr-only {
+      position: absolute; width: 1px; height: 1px;
+      padding: 0; margin: -1px; overflow: hidden;
+      clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+    }
+    .composer-dock {
+      position: sticky;
+      bottom: 0;
+      z-index: 5;
+      margin-top: 1.2rem;
+      padding: 1.4rem 0 0.9rem;
+      background: linear-gradient(to bottom, transparent, var(--bg) 38%);
+    }
+    .composer {
+      display: flex;
+      align-items: flex-end;
+      gap: 0.5rem;
+      margin: 0;
+      background: var(--surface);
+      border: 1px solid var(--border-strong);
+      border-radius: 1.1rem;
+      box-shadow: var(--shadow-2);
+      padding: 0.5rem 0.55rem 0.5rem 0.7rem;
+      transition: border-color 0.12s ease;
+    }
+    .composer:focus-within { border-color: var(--focus-border); }
+    .composer textarea {
+      flex: 1;
+      min-width: 0;
+      border: none;
+      background: none;
+      box-shadow: none;
+      outline: none;
+      resize: none;
+      font: inherit;
+      font-size: 0.92rem;
+      line-height: 1.45;
+      padding: 0.38rem 0.2rem;
+      min-height: 2.1rem;
+      max-height: 10rem;
+      color: var(--text);
+    }
+    .composer-send {
+      flex-shrink: 0;
+      width: 2.15rem;
+      height: 2.15rem;
+      padding: 0;
+      border: none;
+      border-radius: 50%;
+      background: var(--text);
+      color: var(--bg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
+    .composer-send:hover { opacity: 0.85; }
+    .composer-hint {
+      display: flex;
+      justify-content: space-between;
+      gap: 0.75rem;
+      margin: 0.45rem 0.4rem 0;
+      font-size: 0.72rem;
+      color: var(--muted-soft);
+    }
+    .composer-kbd { flex-shrink: 0; }
+    .composer-kbd kbd {
+      font-family: var(--mono);
+      font-size: 0.66rem;
+      border: 1px solid var(--border-strong);
+      border-radius: 4px;
+      padding: 0 0.25rem;
+      background: var(--surface);
     }
 
     /* ── Diff review (commit / session / PR diffs) ───────────────────── */
@@ -2925,6 +3058,29 @@
         transform: rotate(45deg);
         margin-left: -0.1rem;
       }
+      /* ── Session detail: Messages-style composer replaces the tab bar
+         (native detail screens push the tab bar away; back-nav stays via
+         the pill strip / crumb). Keyed off the composer itself — read-only
+         members get no composer and must keep the tab bar. */
+      body:has(#session-continue-form) .tabbar { display: none; }
+      body:has(#session-continue-form) main.main {
+        padding-bottom: calc(7.6rem + env(safe-area-inset-bottom));
+      }
+      .composer-dock {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 90;
+        margin: 0;
+        padding: 0.55rem 0.75rem calc(0.65rem + env(safe-area-inset-bottom));
+        background: color-mix(in srgb, var(--bg) 90%, transparent);
+        -webkit-backdrop-filter: blur(16px);
+        backdrop-filter: blur(16px);
+        border-top: 1px solid var(--border);
+      }
+      .composer textarea { font-size: 16px; }
+      .composer-hint { display: none; }
       /* !important: many config forms set their desktop column layout via an
          inline style attribute, which would otherwise beat this breakpoint and
          push multi-column grids past the phone viewport. */
@@ -3433,6 +3589,53 @@
     }
   })();
   (function () {
+    // Session conversation: composer autosize + ⌘/Ctrl+Enter submit, and
+    // keep the newest turn in view. All handlers are delegated so they
+    // survive boosted navigations and the oob/live-region swaps.
+    function composerInput(e) {
+      var t = e.target;
+      if (!t || t.id !== "continue-prompt") return;
+      t.style.height = "auto";
+      t.style.height = Math.min(t.scrollHeight, 160) + "px";
+    }
+    document.addEventListener("input", composerInput);
+    document.addEventListener("keydown", function (e) {
+      var t = e.target;
+      if (!t || t.id !== "continue-prompt") return;
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        var f = t.closest("form");
+        if (f) f.requestSubmit();
+      }
+    });
+    // Scroll pinning: jump to the latest turn on arrival; while a run
+    // streams, follow SSE re-renders only if the reader is already near the
+    // bottom (never yank someone who scrolled up to re-read).
+    function pinLatest() {
+      var dock = document.getElementById("session-continue-form") ||
+                 document.getElementById("turns");
+      if (dock) dock.scrollIntoView({ block: "end" });
+    }
+    var follow = false;
+    document.body.addEventListener("htmx:beforeSwap", function (e) {
+      if (e.target && e.target.id === "live-session") {
+        follow = window.innerHeight + window.scrollY >= document.body.scrollHeight - 240;
+      }
+    });
+    document.body.addEventListener("htmx:afterSettle", function (e) {
+      if (!document.getElementById("page-session")) return;
+      var id = e.target ? e.target.id : "";
+      if (id === "live-session") {
+        if (follow) pinLatest();
+      } else if (id === "live-root") {
+        pinLatest();
+      }
+    });
+    window.addEventListener("DOMContentLoaded", function () {
+      if (document.getElementById("page-session")) pinLatest();
+    });
+  })();
+  (function () {
     var statusEl = document.getElementById("sse-status");
     // Matches the layout.tmpl mobile shell breakpoint.
     var narrowMQ = window.matchMedia("(max-width: 920px)");
@@ -3505,12 +3708,13 @@
         var ta = document.getElementById("risky-globs");
         if (ta) ta.readOnly = e.target.checked;
       }
-      // Selects and radios marked data-autosubmit apply on change (boosted
-      // POST/GET keeps the SPA feel); a visible or noscript submit button
-      // stays as the no-JS fallback.
+      // Selects, radios, and checkboxes (config hub switches) marked
+      // data-autosubmit apply on change (boosted POST/GET keeps the SPA
+      // feel); a visible or noscript submit button stays as the no-JS
+      // fallback where present.
       var el = e.target;
       if (el && el.matches &&
-          el.matches("select[data-autosubmit], input[type=radio][data-autosubmit]") && el.form) {
+          el.matches("select[data-autosubmit], input[type=radio][data-autosubmit], input[type=checkbox][data-autosubmit]") && el.form) {
         if (el.form.requestSubmit) el.form.requestSubmit();
         else el.form.submit();
       }
@@ -3864,90 +4068,6 @@
     if (!{{json .SSEPath}}) {
       setStatus("offline", "err");
     }
-
-    // Config page: sticky section menu scroll-spy. Highlights the nav pill for
-    // the section currently under the sticky header as the user scrolls.
-    // Re-inits after boosted navigations into #live-root.
-    (function configScrollSpy() {
-      var onScroll = null;
-      var onClick = null;
-      var navEl = null;
-
-      function teardown() {
-        if (onScroll) {
-          window.removeEventListener("scroll", onScroll);
-          onScroll = null;
-        }
-        if (navEl && onClick) {
-          navEl.removeEventListener("click", onClick);
-        }
-        navEl = null;
-        onClick = null;
-      }
-
-      function setup() {
-        teardown();
-        var header = document.querySelector(".config-page-header");
-        if (!header) return;
-        var nav = header.querySelector(".anchor-nav");
-        if (!nav) return;
-        var links = Array.prototype.slice.call(nav.querySelectorAll('a[href^="#"]'));
-        if (!links.length) return;
-        var sections = [];
-        links.forEach(function (a) {
-          var id = (a.getAttribute("href") || "").slice(1);
-          var el = id ? document.getElementById(id) : null;
-          if (el) sections.push({ id: id, el: el });
-        });
-        if (!sections.length) return;
-
-        function setActive(id) {
-          links.forEach(function (a) {
-            a.classList.toggle("active", a.getAttribute("href") === "#" + id);
-          });
-        }
-
-        var ticking = false;
-        onScroll = function () {
-          if (ticking) return;
-          ticking = true;
-          requestAnimationFrame(function () {
-            ticking = false;
-            if (!document.contains(header)) return;
-            var offset = header.getBoundingClientRect().bottom + 12;
-            var current = sections[0].id;
-            for (var i = 0; i < sections.length; i++) {
-              if (sections[i].el.getBoundingClientRect().top <= offset) {
-                current = sections[i].id;
-              }
-            }
-            // Near page bottom the last sections never cross the sticky edge.
-            var doc = document.documentElement;
-            if (window.innerHeight + window.scrollY >= doc.scrollHeight - 4) {
-              current = sections[sections.length - 1].id;
-            }
-            setActive(current);
-          });
-        };
-        onClick = function (e) {
-          var a = e.target && e.target.closest ? e.target.closest('a[href^="#"]') : null;
-          if (!a || !nav.contains(a)) return;
-          var id = (a.getAttribute("href") || "").slice(1);
-          if (id) setActive(id);
-        };
-        navEl = nav;
-        window.addEventListener("scroll", onScroll, { passive: true });
-        nav.addEventListener("click", onClick);
-        onScroll();
-      }
-
-      document.body.addEventListener("htmx:afterSettle", function (e) {
-        var elt = e.detail && e.detail.elt;
-        if (elt && elt.id === "live-root") setup();
-      });
-      document.body.addEventListener("htmx:historyRestore", setup);
-      setup();
-    })();
 
     // ── Diff review (commit / session / PR diffs) ─────────────────────
     // The page ships a file index; hunks load per file (htmx intersect /

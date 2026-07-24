@@ -18,13 +18,13 @@ import (
 
 // teamReviewRow is one history line for PR detail.
 type teamReviewRow struct {
-	Review    reviewstore.Review
-	Fresh     bool
-	StickyCR  bool
-	Label     string // machine verdict
-	LabelText string // human label for badge
+	Review     reviewstore.Review
+	Fresh      bool
+	StickyCR   bool
+	Label      string // machine verdict
+	LabelText  string // human label for badge
 	BadgeClass string
-	HeadShort string
+	HeadShort  string
 }
 
 // reviewRequestRow is one My Reviews table row.
@@ -526,12 +526,12 @@ func buildTeamReviewRows(bucket reviewstore.PRBucket, currentHead string) []team
 	for _, r := range revs {
 		fresh := reviewstore.IsReviewFresh(r.HeadSHA, currentHead)
 		row := teamReviewRow{
-			Review:    r,
-			Fresh:     fresh,
-			Label:     string(r.Verdict),
-			LabelText: teamVerdictText(r.Verdict),
+			Review:     r,
+			Fresh:      fresh,
+			Label:      string(r.Verdict),
+			LabelText:  teamVerdictText(r.Verdict),
 			BadgeClass: teamVerdictBadge(r.Verdict),
-			HeadShort: shortSHA(r.HeadSHA),
+			HeadShort:  shortSHA(r.HeadSHA),
 		}
 		if er, ok := effByID[r.ID]; ok && er.Verdict == reviewstore.VerdictChangesRequested {
 			row.StickyCR = er.Stale

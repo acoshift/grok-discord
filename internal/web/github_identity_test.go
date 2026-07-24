@@ -22,7 +22,7 @@ func TestConfigGitHubMapSectionRenders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := httptest.NewRequest(http.MethodGet, "/config", nil)
+	req := httptest.NewRequest(http.MethodGet, "/config/github-identities", nil)
 	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sid})
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, req)
@@ -31,11 +31,10 @@ func TestConfigGitHubMapSectionRenders(t *testing.T) {
 	}
 	body := w.Body.String()
 	for _, want := range []string{
-		`id="page-config"`,
+		`id="page-config-identities"`,
 		`id="github-attribution"`,
 		`id="github-identity-form"`,
 		`id="github-identity-table"`,
-		`href="#github-attribution"`,
 		"Discord user → GitHub login",
 		"@alice",
 		"99",
@@ -59,7 +58,7 @@ func TestConfigGitHubMapEmptyState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := httptest.NewRequest(http.MethodGet, "/config", nil)
+	req := httptest.NewRequest(http.MethodGet, "/config/github-identities", nil)
 	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sid})
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, req)

@@ -1,24 +1,7 @@
 {{define "content"}}
 <div class="config-page" id="page-config">
-<div class="config-page-header">
-  <h1>Config</h1>
-  <p class="sub">Manage projects, channel map, and allowlists. Changes persist to the config file and apply immediately.</p>
-  <nav class="anchor-nav" aria-label="Config sections">
-    <a href="#bot-invite">Bot invite</a>
-    <a href="#grok-run-limits">Run limits</a>
-    <a href="#worktree-cleanup">Worktrees</a>
-    <a href="#resume-active-runs">Resume</a>
-    <a href="#team-board">Board</a>
-    <a href="#ci-triage">CI triage</a>
-    <a href="#discord-pr-links">PR links</a>
-    <a href="#github-attribution">GitHub map</a>
-    <a href="#risky-paths">Risk paths</a>
-    <a href="#projects">Projects</a>
-    <a href="#default-guild">Default guild</a>
-    <a href="#channels">Channels</a>
-    <a href="#access">Access</a>
-  </nav>
-</div>
+<h1>Config</h1>
+<p class="sub">Global bot &amp; runtime settings — each row opens a focused page. Changes persist to the config file and apply immediately. Per-project settings (members, workflow, integrations) live inside each project.</p>
 
 {{if .Flash}}
 <div class="flash">{{.Flash}}</div>
@@ -27,352 +10,105 @@
 <div class="flash err">{{.Error}}</div>
 {{end}}
 
-<div class="section card" id="bot-invite">
-  <h2>Bot install / permission update URL</h2>
-  <p class="sub" style="margin-top:0">
-    Invite this bot or <strong>re-authorize</strong> it on a server already joined so the role picks up the current permission set.
-    Required: View Channel, Send Messages, Manage Messages, <strong>Pin Messages</strong> (continuity brief card), Attach Files, Read Message History, Create Public Threads, Send Messages in Threads.
-  </p>
-  {{if .Config.InviteURL}}
-  <div class="invite-row">
-    <input id="invite-url" type="text" readonly value="{{.Config.InviteURL}}" onclick="this.select()">
-    <button type="button" class="btn btn-secondary" data-copy-target="invite-url">Copy</button>
-    <a class="btn btn-secondary" href="{{.Config.InviteURL}}" target="_blank" rel="noopener noreferrer">Open / re-authorize</a>
-  </div>
-  <p class="sub" style="margin:0.65rem 0 0">
-    Client ID: <span class="mono">{{.Config.ClientID}}</span>
-    · permissions <span class="mono">{{.Config.InvitePermissions}}</span>
-    · scope <span class="mono">bot</span>
-  </p>
-  <p class="sub" style="margin:0.35rem 0 0">
-    Changing the URL alone does not upgrade an already-joined bot — open the link above, pick the server, and approve again.
-    Brief pin failures (<span class="mono">Missing Permissions</span> / code <span class="mono">50013</span>) mean <strong>Pin Messages</strong> is still missing on the bot role (Discord split this from Manage Messages).
-  </p>
-  <p class="sub" style="margin:0.35rem 0 0">Also enable <strong>Message Content Intent</strong> in the Developer Portal (Bot → Privileged Gateway Intents).</p>
-  {{else}}
-  <div class="flash err" style="margin:0">Could not build install URL{{if .Config.InviteError}}: {{.Config.InviteError}}{{end}}. Set a valid <span class="mono">discordToken</span> or <span class="mono">discordClientId</span> in config.json.</div>
-  {{end}}
-</div>
+<div class="cfg-hub">
+  <div class="cfg-hub-col">
+    <div class="drill-cap">Bot</div>
+    <div class="drill-group">
+      <a class="drill" href="{{route "config.bot"}}">
+        <span class="drill-main">
+          <span class="drill-t">Discord bot</span>
+          <span class="drill-s">install / re-authorize · default guild</span>
+        </span>
+        {{if .Config.InviteURL}}<span class="drill-v">ready</span>{{else}}<span class="badge status-warn">setup needed</span>{{end}}
+      </a>
+      <a class="drill" href="{{route "config.channels"}}">
+        <span class="drill-main">
+          <span class="drill-t">Channel map</span>
+          <span class="drill-s">Discord channel → project routing</span>
+        </span>
+        <span class="drill-v">{{len .Config.Channels}} channel{{if ne (len .Config.Channels) 1}}s{{end}}</span>
+      </a>
+      <a class="drill" href="{{route "config.identities"}}">
+        <span class="drill-main">
+          <span class="drill-t">GitHub attribution</span>
+          <span class="drill-s">Discord user → GitHub login map</span>
+        </span>
+        <span class="drill-v">{{len .Config.GitHubIdentities}} mapped</span>
+      </a>
+    </div>
 
-<div class="section card" id="grok-run-limits">
-  <h2>Grok run limits</h2>
-  <p class="sub" style="margin-top:0">
-    Per Discord task: <span class="mono">maxTurns</span> is the tool/turn budget for
-    <span class="mono">grok -p</span>; <span class="mono">timeoutMs</span> kills the process after that many milliseconds.
-    Defaults are <span class="mono">40</span> turns and <span class="mono">1800000</span> ms (30 minutes). Applies to new runs only.
-  </p>
-  <form class="inline" method="post" action="{{route "config.settings"}}" style="grid-template-columns: 1fr 1fr auto;">
-    {{template "csrf" $}}
-    <input type="hidden" name="section" value="run">
-    <div>
-      <label for="max-turns">Max turns</label>
-      <input id="max-turns" type="number" name="maxTurns" min="1" step="1" required value="{{.Config.MaxTurns}}" autocomplete="off">
-    </div>
-    <div>
-      <label for="timeout-ms">Timeout (ms)</label>
-      {{/* min=1000 and step=1: min=1+step=1000 made default 1800000 fail HTML5 validation. */}}
-      <input id="timeout-ms" type="number" name="timeoutMs" min="1000" max="86400000" step="1" required value="{{.Config.TimeoutMs}}" autocomplete="off" title="1000–86400000 ms (1 second–24 hours)">
-    </div>
-    <button type="submit">Save</button>
-  </form>
-  <p class="sub" style="margin:0.5rem 0 0">Range: 1 s–24 h. Examples: 15 min = <span class="mono">900000</span>, 30 min = <span class="mono">1800000</span>, 1 h = <span class="mono">3600000</span>.</p>
-</div>
-
-<div class="section card" id="worktree-cleanup">
-  <h2>Worktrees</h2>
-  <p class="sub" style="margin-top:0">
-    New per-thread git worktrees are created under <span class="mono">&lt;root&gt;/&lt;project&gt;/&lt;threadId&gt;</span>.
-    Leave the folder empty to use the default <span class="mono">data/worktrees</span> next to <span class="mono">config.json</span>.
-    Absolute path recommended; relative paths resolve against the config file directory.
-    Existing sessions keep their stored path until reset. Idle prune after this many days without activity (<span class="mono">0</span> disables; default <span class="mono">30</span>).
-  </p>
-  <form class="inline" method="post" action="{{route "config.settings"}}" style="grid-template-columns: 2fr 1fr auto;">
-    {{template "csrf" $}}
-    <input type="hidden" name="section" value="worktree">
-    <div>
-      <label for="worktree-dir">Worktree folder</label>
-      <input id="worktree-dir" type="text" name="worktreeDir" value="{{.Config.WorktreeDir}}" placeholder="empty = data/worktrees" autocomplete="off" spellcheck="false">
-    </div>
-    <div>
-      <label for="worktree-idle-ttl">Idle TTL (days)</label>
-      <input id="worktree-idle-ttl" type="number" name="worktreeIdleTTLDays" min="0" step="1" required value="{{.Config.WorktreeIdleTTLDays}}" autocomplete="off">
-    </div>
-    <button type="submit">Save</button>
-  </form>
-  <p class="sub" style="margin:0.5rem 0 0">Effective root for new worktrees: <span class="mono">{{.Config.WorktreesRoot}}</span></p>
-</div>
-
-<div class="section card" id="resume-active-runs">
-  <h2>Crash-safe active runs</h2>
-  <p class="sub" style="margin-top:0">
-    Persist in-flight Grok runs and follow-up queues under <span class="mono">data/runs/</span> so a process restart auto-resumes work.
-    Default is <strong>on</strong>. Turn off only for debugging; leftover journals are purged on the next boot when disabled.
-  </p>
-  <form class="inline" method="post" action="{{route "config.settings"}}" style="grid-template-columns: auto auto;">
-    {{template "csrf" $}}
-    <input type="hidden" name="section" value="resume">
-    <div>
-      <label class="check">
-        <input type="checkbox" name="resumeActiveRuns" value="1" {{if .Config.ResumeActiveRuns}}checked{{end}}>
-        Resume active runs after restart
-      </label>
-    </div>
-    <button type="submit">Save</button>
-  </form>
-</div>
-
-<div class="section card" id="team-board">
-  <h2>Team activity board</h2>
-  <p class="sub" style="margin-top:0">
-    <span class="mono">@Grok /board</span> groups threads by activity (running, queued, waiting on human, stale).
-    Stale is based on session inactivity. Optional nightly digest posts the board into a Discord channel.
-  </p>
-  <form class="inline" method="post" action="{{route "config.settings"}}" style="grid-template-columns: 1fr 2fr auto;">
-    {{template "csrf" $}}
-    <input type="hidden" name="section" value="board">
-    <div>
-      <label for="board-stale-days">Stale after (days)</label>
-      <input id="board-stale-days" type="number" name="boardStaleDays" min="1" step="1" required value="{{.Config.BoardStaleDays}}" autocomplete="off">
-    </div>
-    <div>
-      <label for="board-digest-channel">Nightly digest channel ID</label>
-      <input id="board-digest-channel" type="text" name="boardDigestChannel" value="{{.Config.BoardDigestChannel}}" placeholder="optional Discord channel ID" autocomplete="off">
-    </div>
-    <button type="submit">Save</button>
-  </form>
-  <p class="sub" style="margin:0.5rem 0 0">Default stale threshold is <span class="mono">3</span> days. Leave the channel empty to disable the digest.</p>
-</div>
-
-<div class="section card" id="ci-triage">
-  <h2>CI triage</h2>
-  <p class="sub" style="margin-top:0">
-    When a thread’s PR has failing checks, the bot posts a digest and offers <span class="mono">@Grok /fix-ci</span>.
-    Optionally auto-queue a fix (default off). Cap is per Discord thread session.
-  </p>
-  <form class="inline" method="post" action="{{route "config.settings"}}" style="grid-template-columns: auto 1fr auto;">
-    {{template "csrf" $}}
-    <input type="hidden" name="section" value="ci">
-    <div>
-      <label class="check">
-        <input type="checkbox" name="autoFixCI" value="1" {{if .Config.AutoFixCI}}checked{{end}}>
-        Auto-queue CI fix
-      </label>
-    </div>
-    <div>
-      <label for="auto-fix-ci-max">Max auto attempts</label>
-      <input id="auto-fix-ci-max" type="number" name="autoFixCIMax" min="1" step="1" required value="{{.Config.AutoFixCIMax}}" autocomplete="off">
-    </div>
-    <button type="submit">Save</button>
-  </form>
-  <p class="sub" style="margin:0.5rem 0 0">Max is per Discord thread session (default 2). Manual <span class="mono">/fix-ci</span> is always available.</p>
-</div>
-
-<div class="section card" id="discord-pr-links">
-  <h2>Discord PR links</h2>
-  <p class="sub" style="margin-top:0">
-    When the bot posts a pull request link in Discord (status cards, brief, completion, timeline, review pings),
-    choose whether to open GitHub or this web UI. Stored session data always keeps the GitHub URL for <span class="mono">gh</span>.
-  </p>
-  <form class="inline" method="post" action="{{route "config.settings"}}" style="grid-template-columns: 1fr auto;">
-    {{template "csrf" $}}
-    <input type="hidden" name="section" value="discordPRLink">
-    <div>
-      <label for="discord-pr-link">Link target</label>
-      <select id="discord-pr-link" name="discordPRLink">
-        <option value="github" {{if ne .Config.DiscordPRLink "web"}}selected{{end}}>GitHub (github.com/…/pull/N)</option>
-        <option value="web" {{if eq .Config.DiscordPRLink "web"}}selected{{end}}>Web UI (/prs/owner/repo/N)</option>
-      </select>
-    </div>
-    <button type="submit">Save</button>
-  </form>
-  {{if eq .Config.DiscordPRLink "web"}}
-    {{if .Config.WebPublicBaseURL}}
-  <p class="sub" style="margin:0.5rem 0 0">Base: <span class="mono">{{.Config.WebPublicBaseURL}}</span> — example: <span class="mono">{{.Config.WebPublicBaseURL}}/prs/owner/repo/42</span></p>
-    {{else}}
-  <div class="flash err" style="margin:0.65rem 0 0">Web mode is on, but <span class="mono">webPublicBaseURL</span> is empty — Discord will fall back to GitHub until you set a public origin (config or <span class="mono">GROK_WORK_PUBLIC_BASE_URL</span>).</div>
-    {{end}}
-  {{else}}
-  <p class="sub" style="margin:0.5rem 0 0">Default is GitHub. Web mode needs <span class="mono">webPublicBaseURL</span> so links are absolute and clickable.</p>
-  {{end}}
-</div>
-
-<div class="section card gh-map-card" id="github-attribution">
-  <div class="gh-map-header">
-    <div class="gh-map-eyebrow">Attribution · Tier A</div>
-    <h2>Discord user → GitHub login</h2>
-    <p class="sub" style="margin-top:0">
-      Maps Discord snowflakes to GitHub profiles for ship trailers, PR footers, and web comment prefixes.
-      The host bot still pushes and comments; this only records who asked.
-      Unmapped users keep plain Discord attribution — no invented <span class="mono">@login</span>.
-    </p>
-  </div>
-
-  <div class="gh-map-bridge" aria-hidden="true">
-    <span class="gh-map-node gh-map-node-discord">Discord id</span>
-    <span class="gh-map-rail"></span>
-    <span class="gh-map-node gh-map-node-github">@login</span>
-  </div>
-
-  <form class="gh-map-form" method="post" action="{{route "config.setGitHubIdentity"}}" id="github-identity-form">
-    {{template "csrf" $}}
-    <div class="gh-map-fields">
-      <div>
-        <label for="gh-discord-id">Discord user ID</label>
-        <input id="gh-discord-id" type="text" name="discordUserId" placeholder="123456789012345678" required autocomplete="off" spellcheck="false" inputmode="numeric" pattern="[0-9]+" title="Discord snowflake (digits only)">
+    <div class="drill-cap">Grok runtime</div>
+    <div class="drill-group">
+      <a class="drill" href="{{route "config.run"}}">
+        <span class="drill-main">
+          <span class="drill-t">Run limits</span>
+          <span class="drill-s">turn budget &amp; timeout per Discord task</span>
+        </span>
+        <span class="drill-v">{{.Config.MaxTurns}} turns · {{msDur .Config.TimeoutMs}}</span>
+      </a>
+      <div class="drill">
+        <span class="drill-main">
+          <span class="drill-t">Crash-safe active runs</span>
+          <span class="drill-s">persist &amp; auto-resume after restart</span>
+        </span>
+        {{/* Pure boolean — toggles in place, no drill-in page. */}}
+        <form method="post" action="{{route "config.resume"}}" class="drill-toggle">
+          {{template "csrf" $}}
+          <label class="switch" title="Resume active runs after restart">
+            <input type="checkbox" name="resumeActiveRuns" value="1" {{if .Config.ResumeActiveRuns}}checked{{end}} data-autosubmit>
+            <span class="knob" aria-hidden="true"></span>
+            <span class="sr-only">Resume active runs after restart</span>
+          </label>
+        </form>
       </div>
-      <div>
-        <label for="gh-login">GitHub login</label>
-        <input id="gh-login" type="text" name="login" placeholder="alice" required autocomplete="off" spellcheck="false">
-      </div>
-      <div>
-        <label for="gh-name">Display name <span class="muted">(optional)</span></label>
-        <input id="gh-name" type="text" name="name" placeholder="Alice Example" autocomplete="name">
-      </div>
-      <div>
-        <label for="gh-email">Email <span class="muted">(optional)</span></label>
-        <input id="gh-email" type="email" name="email" placeholder="alice@users.noreply.github.com" autocomplete="off" spellcheck="false">
-      </div>
+      <a class="drill" href="{{route "config.risky"}}">
+        <span class="drill-main">
+          <span class="drill-t">Completion risk paths</span>
+          <span class="drill-s">globs flagged on completion cards</span>
+        </span>
+        <span class="drill-v">{{if .Config.RiskyPathUseDefault}}defaults{{else}}custom{{end}}</span>
+      </a>
     </div>
-    <div class="form-actions">
-      <button type="submit">Save mapping</button>
-    </div>
-    <p class="sub" style="margin:0.5rem 0 0">
-      Saving the same Discord id updates that row. Login is required; leading <span class="mono">@</span> is stripped.
-      Empty email uses GitHub’s noreply address for Co-authored-by.
-    </p>
-  </form>
-
-  {{if .Config.GitHubIdentities}}
-  <div class="table-scroll gh-map-table-wrap">
-  <table class="gh-map-table" id="github-identity-table">
-    <thead>
-      <tr>
-        <th>Discord user</th>
-        <th>GitHub</th>
-        <th>Name</th>
-        <th>Email</th>
-        <th></th>
-      </tr>
-    </thead>
-    <tbody>
-      {{range .Config.GitHubIdentities}}
-      <tr>
-        <td class="mono">
-          {{$dn := index $.DiscordUserNames .DiscordUserID}}
-          {{if $dn}}<span class="gh-map-display">{{$dn}}</span><br>{{end}}
-          <span class="muted">{{.DiscordUserID}}</span>
-        </td>
-        <td class="mono"><span class="gh-map-login">@{{.Login}}</span></td>
-        <td>{{if .Name}}{{.Name}}{{else}}<span class="muted">—</span>{{end}}</td>
-        <td class="mono muted">{{if .Email}}{{.Email}}{{else}}noreply default{{end}}</td>
-        <td class="row-actions">
-          <form method="post" action="{{route "config.removeGitHubIdentity"}}" onsubmit="return confirm('Remove map for Discord {{.DiscordUserID}}?');">
-            {{template "csrf" $}}
-            <input type="hidden" name="discordUserId" value="{{.DiscordUserID}}">
-            <button type="submit" class="btn-danger">Remove</button>
-          </form>
-        </td>
-      </tr>
-      {{end}}
-    </tbody>
-  </table>
   </div>
-  {{else}}
-  <div class="empty gh-map-empty" id="github-identity-empty">
-    No Discord users mapped yet. Add a snowflake and GitHub login so comments and ship trailers name the right person.
+
+  <div class="cfg-hub-col">
+    <div class="drill-cap">Automation</div>
+    <div class="drill-group">
+      <a class="drill" href="{{route "config.board"}}">
+        <span class="drill-main">
+          <span class="drill-t">Team activity board</span>
+          <span class="drill-s">/board grouping · nightly digest</span>
+        </span>
+        <span class="drill-v">stale {{.Config.BoardStaleDays}}d{{if .Config.BoardDigestChannel}} · digest on{{end}}</span>
+      </a>
+      <a class="drill" href="{{route "config.ci"}}">
+        <span class="drill-main">
+          <span class="drill-t">CI triage</span>
+          <span class="drill-s">auto-queue /fix-ci on failing checks</span>
+        </span>
+        <span class="drill-v">{{if .Config.AutoFixCI}}on · max {{.Config.AutoFixCIMax}}{{else}}manual{{end}}</span>
+      </a>
+      <a class="drill" href="{{route "config.prlinks"}}">
+        <span class="drill-main">
+          <span class="drill-t">Discord PR links</span>
+          <span class="drill-s">link target in bot messages</span>
+        </span>
+        <span class="drill-v">{{if eq .Config.DiscordPRLink "web"}}web UI{{else}}GitHub{{end}}</span>
+      </a>
+    </div>
+
+    <div class="drill-cap">Worktrees</div>
+    <div class="drill-group">
+      <a class="drill" href="{{route "config.worktrees"}}">
+        <span class="drill-main">
+          <span class="drill-t">Folder &amp; idle cleanup</span>
+          <span class="drill-s mono">{{.Config.WorktreesRoot}}</span>
+        </span>
+        <span class="drill-v">{{if .Config.WorktreeIdleTTLDays}}TTL {{.Config.WorktreeIdleTTLDays}}d{{else}}TTL off{{end}}</span>
+      </a>
+    </div>
   </div>
-  {{end}}
 </div>
-
-<div class="section card" id="risky-paths">
-  <h2>Completion risk paths</h2>
-  <p class="sub" style="margin-top:0">
-    Globs that flag paths on the completion summary card (migrations, auth, deploy, …).
-    One pattern per line; <span class="mono">**</span> and <span class="mono">*</span> supported. Lines starting with <span class="mono">#</span> are comments.
-  </p>
-  <form method="post" action="{{route "config.settings"}}">
-    {{template "csrf" $}}
-    <input type="hidden" name="section" value="risky">
-    <div style="margin-bottom: 0.65rem;">
-      <label class="check">
-        <input type="checkbox" name="riskyPathUseDefault" value="1" id="risky-use-default" {{if .Config.RiskyPathUseDefault}}checked{{end}}>
-        Use built-in defaults
-      </label>
-    </div>
-    <div>
-      <label for="risky-globs">Globs</label>
-      <textarea id="risky-globs" name="riskyPathGlobs" rows="8" placeholder="**/migrations/**&#10;**/auth/**&#10;**/.env*" {{if .Config.RiskyPathUseDefault}}readonly{{end}}>{{.Config.RiskyPathGlobsText}}</textarea>
-    </div>
-    <p class="sub" style="margin:0.5rem 0 0">
-      With defaults checked, the list is shown read-only (not stored as a custom override).
-      Uncheck defaults to edit; clear the box entirely to disable risk highlighting.
-    </p>
-    <div class="form-actions">
-      <button type="submit">Save</button>
-    </div>
-  </form>
-</div>
-
-<div class="section card" id="projects">
-  <h2>Add project folder</h2>
-  <p class="sub" style="margin-top:0">
-    Each project has its own settings page (GitHub repos, Discord, Linear, channel map) — adding one takes you straight there.
-    Existing projects are listed below.
-  </p>
-  <form class="inline" method="post" action="{{route "config.addProject"}}">
-    {{template "csrf" $}}
-    <div>
-      <label for="proj-name">Name</label>
-      <input id="proj-name" type="text" name="name" placeholder="myapp" required autocomplete="off">
-    </div>
-    <div>
-      <label for="proj-path">Absolute path</label>
-      <input id="proj-path" type="text" name="path" placeholder="/absolute/path/to/repo" required autocomplete="off">
-    </div>
-    <button type="submit">Add folder</button>
-  </form>
-</div>
-
-<div class="section card" id="default-guild">
-  <h2>Default Discord guild (fallback)</h2>
-  <p class="sub" style="margin-top:0">
-    Used only when a project has no guild of its own. Prefer setting the guild on each project below for multi-server setups.
-  </p>
-  <form class="inline" method="post" action="{{route "config.setGuild"}}" style="grid-template-columns: 1fr auto;">
-    {{template "csrf" $}}
-    <div>
-      <label for="guild-id">Default guild ID</label>
-      <input id="guild-id" type="text" name="discordGuildId" value="{{.Config.DiscordGuildID}}" placeholder="optional fallback" autocomplete="off">
-    </div>
-    <button type="submit">Save default guild</button>
-  </form>
-</div>
-
-<div class="section card" id="channels">
-  <h2>Add channel map</h2>
-  <form class="inline" method="post" action="{{route "config.addChannel"}}">
-    {{template "csrf" $}}
-    <div>
-      <label for="channel-id">Discord channel ID</label>
-      <input id="channel-id" type="text" name="channelId" placeholder="123456789012345678" required autocomplete="off">
-    </div>
-    <div>
-      <label for="channel-project">Project</label>
-      <select id="channel-project" name="project" required>
-        <option value="" disabled selected>Select project…</option>
-        {{range .Config.ProjectNames}}
-        <option value="{{.}}">{{.}}</option>
-        {{end}}
-      </select>
-    </div>
-    <button type="submit">Add channel</button>
-  </form>
-  {{if not .Config.ProjectNames}}
-  <p class="sub" style="margin:0.5rem 0 0">Add a project first, then map a channel to it.</p>
-  {{end}}
-</div>
-
-<p class="sub" id="access">Members are configured per project (open a project’s Settings). A project with no members is fail-closed — nobody can <span class="mono">@Grok</span> on its channels.</p>
 
 {{/* hx-target/hx-select override shell boost (#live-root) so SSE partials swap into the region, not wipe the page. */}}
 <div class="live-region"
@@ -385,75 +121,34 @@
      hx-sync="this:queue last">
   {{template "config_lists" .}}
 </div>
+
+<p class="sub" id="access">Members are configured per project (open a project’s Settings). A project with no members is fail-closed — nobody can <span class="mono">@Grok</span> on its channels.</p>
 </div>
 {{end}}
 
 {{define "config_lists"}}
 <div class="section">
-  <h2>Projects</h2>
+  <div class="drill-cap" style="display:flex;justify-content:space-between;align-items:baseline">Projects <a href="{{route "config.projectNew"}}" style="text-transform:none;letter-spacing:0;font-weight:550">+ Add project</a></div>
   {{if .Config.Projects}}
-  <div class="table-scroll">
-  <table>
-    <thead><tr><th>Name</th><th>Path</th><th>Members</th><th>Discord</th><th>Linear</th><th></th></tr></thead>
-    <tbody>
-      {{range .Config.Projects}}
-      <tr>
-        <td class="mono"><a href="/config/projects/{{.Name}}">{{.Name}}</a></td>
-        <td class="mono muted">{{.Path}}</td>
-        <td class="mono">
-          {{$mu := len .AllowedUserIDs}}{{$mr := len .AllowedRoleIDs}}
-          {{if or $mu $mr}}{{$mu}} user{{if ne $mu 1}}s{{end}}{{if $mr}} · {{$mr}} role{{if ne $mr 1}}s{{end}}{{end}}{{else}}<span class="badge status-warn">none</span>{{end}}
-        </td>
-        <td class="mono">
-          {{if .ChannelOptions}}{{len .ChannelOptions}} channel{{if ne (len .ChannelOptions) 1}}s{{end}}{{else}}<span class="badge status-warn">no channels</span>{{end}}
-        </td>
-        <td class="mono">
-          {{if .LinearEnabled}}
-            on{{if .LinearTeamKey}} · {{.LinearTeamKey}}{{end}}{{if .LinearAPIKeySet}} · key set{{else}} · no key{{end}}
-          {{else}}
-            off
-          {{end}}
-        </td>
-        <td class="row-actions">
-          <a class="btn btn-secondary" style="height:2rem;font-size:0.82rem;" href="/projects/{{.Name}}">Open</a>
-          <a class="btn btn-secondary" style="height:2rem;font-size:0.82rem;" href="/config/projects/{{.Name}}">Settings</a>
-        </td>
-      </tr>
-      {{end}}
-    </tbody>
-  </table>
+  <div class="drill-group">
+    {{range .Config.Projects}}
+    <a class="drill" href="/config/projects/{{.Name}}">
+      <span class="proj-mark" aria-hidden="true">{{printf "%.1s" .Name}}</span>
+      <span class="drill-main">
+        <span class="drill-t">{{.Name}}</span>
+        <span class="drill-s mono">{{.Path}}</span>
+      </span>
+      <span class="drill-v">
+        {{$mu := len .AllowedUserIDs}}{{$mr := len .AllowedRoleIDs}}
+        {{if or $mu $mr}}{{add $mu $mr}} member{{if ne (add $mu $mr) 1}}s{{end}}{{else}}no members{{end}}
+        · {{if .ChannelOptions}}{{len .ChannelOptions}} ch{{else}}no ch{{end}}
+      </span>
+      {{if not (or (len .AllowedUserIDs) (len .AllowedRoleIDs))}}<span class="badge status-warn">fail-closed</span>{{end}}
+    </a>
+    {{end}}
   </div>
   {{else}}
-  <div class="empty">No projects configured.</div>
+  <div class="empty">No projects configured. <a href="{{route "config.projectNew"}}">Add the first one.</a></div>
   {{end}}
 </div>
-
-<div class="section">
-  <h2>Channel map</h2>
-  {{if .Config.Channels}}
-  <div class="table-scroll">
-  <table>
-    <thead><tr><th>Channel ID</th><th>Project</th><th></th></tr></thead>
-    <tbody>
-      {{range .Config.Channels}}
-      <tr>
-        <td class="mono">{{.ChannelID}}</td>
-        <td>{{.Project}}</td>
-        <td class="row-actions">
-          <form method="post" action="{{route "config.removeChannel"}}" onsubmit="return confirm('Remove channel {{.ChannelID}}?');">
-            {{template "csrf" $}}
-            <input type="hidden" name="channelId" value="{{.ChannelID}}">
-            <button type="submit" class="btn-danger">Remove</button>
-          </form>
-        </td>
-      </tr>
-      {{end}}
-    </tbody>
-  </table>
-  </div>
-  {{else}}
-  <div class="empty">No channels mapped.</div>
-  {{end}}
-</div>
-
 {{end}}

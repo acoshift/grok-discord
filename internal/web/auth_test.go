@@ -35,17 +35,17 @@ func authOnServer(t *testing.T) (*Server, *config.Config, *FakeDiscordOAuth) {
 			// alone does not grant CanAccessProject (project ACL is allowlist-based).
 			"proj": {Path: proj, AllowedUserIDs: []string{"allow-user", "member-1", "viewer-1"}},
 		},
-		Channels:            map[string]string{"ch": "proj"},
-		GrokBin:             "grok",
-		MaxTurns:            40,
-		TimeoutMs:           1000,
-		HTTPListen:          "127.0.0.1:0",
-		ConfigPath:          cfgPath,
-		DataDir:             filepath.Join(dir, "data"),
+		Channels:   map[string]string{"ch": "proj"},
+		GrokBin:    "grok",
+		MaxTurns:   40,
+		TimeoutMs:  1000,
+		HTTPListen: "127.0.0.1:0",
+		ConfigPath: cfgPath,
+		DataDir:    filepath.Join(dir, "data"),
 		WebAuth: &config.WebAuthConfig{
-			Enabled:         true,
-			SessionSecret:   "test-session-secret-32-bytes-long!",
-			AdminDiscordIDs: []string{"admin-1"},
+			Enabled:          true,
+			SessionSecret:    "test-session-secret-32-bytes-long!",
+			AdminDiscordIDs:  []string{"admin-1"},
 			MemberDiscordIDs: []string{"member-1"},
 			ViewerDiscordIDs: []string{"viewer-1"},
 		},
@@ -89,8 +89,8 @@ func TestAuthOffPagesAndMutate(t *testing.T) {
 		t.Fatalf("GET / status=%d", w.Code)
 	}
 
-	form := url.Values{"section": {"worktree"}, "worktreeIdleTTLDays": {"7"}}
-	req = httptest.NewRequest(http.MethodPost, "/config/settings", strings.NewReader(form.Encode()))
+	form := url.Values{"worktreeIdleTTLDays": {"7"}}
+	req = httptest.NewRequest(http.MethodPost, "/config/worktrees", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w = httptest.NewRecorder()
 	h.ServeHTTP(w, req)
@@ -347,8 +347,8 @@ func TestAuthOnOAuthCallbackAndAdminMutate(t *testing.T) {
 	}
 
 	// Unauthenticated POST rejected.
-	form := url.Values{"section": {"worktree"}, "worktreeIdleTTLDays": {"3"}}
-	req = httptest.NewRequest(http.MethodPost, "/config/settings", strings.NewReader(form.Encode()))
+	form := url.Values{"worktreeIdleTTLDays": {"3"}}
+	req = httptest.NewRequest(http.MethodPost, "/config/worktrees", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w = httptest.NewRecorder()
 	h.ServeHTTP(w, req)
@@ -360,7 +360,7 @@ func TestAuthOnOAuthCallbackAndAdminMutate(t *testing.T) {
 	}
 
 	// Admin without CSRF → 403
-	req = httptest.NewRequest(http.MethodPost, "/config/settings", strings.NewReader(form.Encode()))
+	req = httptest.NewRequest(http.MethodPost, "/config/worktrees", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sid})
 	w = httptest.NewRecorder()
@@ -372,7 +372,7 @@ func TestAuthOnOAuthCallbackAndAdminMutate(t *testing.T) {
 	// Admin with CSRF succeeds.
 	form.Set("csrf", sess.CSRF)
 	form.Set("worktreeIdleTTLDays", "11")
-	req = httptest.NewRequest(http.MethodPost, "/config/settings", strings.NewReader(form.Encode()))
+	req = httptest.NewRequest(http.MethodPost, "/config/worktrees", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sid})
 	w = httptest.NewRecorder()
@@ -435,11 +435,10 @@ func TestAuthOnMemberCannotMutate(t *testing.T) {
 		t.Fatal(err)
 	}
 	form := url.Values{
-		"section":             {"worktree"},
 		"worktreeIdleTTLDays": {"9"},
 		"csrf":                {csrf},
 	}
-	req := httptest.NewRequest(http.MethodPost, "/config/settings", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, "/config/worktrees", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sid})
 	w := httptest.NewRecorder()

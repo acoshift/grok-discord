@@ -1,0 +1,32 @@
+{{define "content"}}
+<div class="config-sub" id="page-config-risky">
+{{template "config_sub_header" $}}
+<h1>Completion risk paths</h1>
+<p class="sub">
+  Globs that flag paths on the completion summary card (migrations, auth, deploy, …).
+  One pattern per line; <span class="mono">**</span> and <span class="mono">*</span> supported. Lines starting with <span class="mono">#</span> are comments.
+</p>
+<div class="section card">
+  <form method="post" action="{{route "config.risky"}}">
+    {{template "csrf" $}}
+    <div style="margin-bottom: 0.65rem;">
+      <label class="check">
+        <input type="checkbox" name="riskyPathUseDefault" value="1" id="risky-use-default" {{if .Config.RiskyPathUseDefault}}checked{{end}}>
+        Use built-in defaults
+      </label>
+    </div>
+    <div>
+      <label for="risky-globs">Globs</label>
+      <textarea id="risky-globs" name="riskyPathGlobs" rows="8" placeholder="**/migrations/**&#10;**/auth/**&#10;**/.env*" {{if .Config.RiskyPathUseDefault}}readonly{{end}}>{{.Config.RiskyPathGlobsText}}</textarea>
+    </div>
+    <p class="sub" style="margin:0.5rem 0 0">
+      With defaults checked, the list is shown read-only (not stored as a custom override).
+      Uncheck defaults to edit; clear the box entirely to disable risk highlighting.
+    </p>
+    <div class="form-actions">
+      <button type="submit">Save</button>
+    </div>
+  </form>
+</div>
+</div>
+{{end}}

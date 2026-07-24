@@ -35,13 +35,13 @@ func TestLiveHTTPLaunch(t *testing.T) {
 		Projects: config.ProjectsMap{
 			"proj": {Path: proj, AllowedUserIDs: []string{"u0"}},
 		},
-		Channels: map[string]string{"ch": "proj"},
-		GrokBin:  "grok",
-		MaxTurns:       40,
-		TimeoutMs:      1000,
-		HTTPListen:     "127.0.0.1:0",
-		ConfigPath:     cfgPath,
-		DataDir:        filepath.Join(dir, "data"),
+		Channels:   map[string]string{"ch": "proj"},
+		GrokBin:    "grok",
+		MaxTurns:   40,
+		TimeoutMs:  1000,
+		HTTPListen: "127.0.0.1:0",
+		ConfigPath: cfgPath,
+		DataDir:    filepath.Join(dir, "data"),
 	}
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)

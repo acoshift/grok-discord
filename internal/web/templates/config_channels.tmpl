@@ -1,0 +1,73 @@
+{{define "content"}}
+<div class="config-sub" id="page-config-channels">
+{{template "config_sub_header" $}}
+<h1>Channel map</h1>
+<p class="sub">Discord channels routed to projects. Tasks land on the mapped project; a thread inherits its parent channel’s mapping.</p>
+
+<div class="section card" id="channels">
+  <h2>Add channel map</h2>
+  <form class="inline" method="post" action="{{route "config.addChannel"}}">
+    {{template "csrf" $}}
+    <div>
+      <label for="channel-id">Discord channel ID</label>
+      <input id="channel-id" type="text" name="channelId" placeholder="123456789012345678" required autocomplete="off">
+    </div>
+    <div>
+      <label for="channel-project">Project</label>
+      <select id="channel-project" name="project" required>
+        <option value="" disabled selected>Select project…</option>
+        {{range .Config.ProjectNames}}
+        <option value="{{.}}">{{.}}</option>
+        {{end}}
+      </select>
+    </div>
+    <button type="submit">Add channel</button>
+  </form>
+  {{if not .Config.ProjectNames}}
+  <p class="sub" style="margin:0.5rem 0 0">Add a project first, then map a channel to it.</p>
+  {{end}}
+</div>
+
+{{/* hx-target/hx-select override shell boost (#live-root) so SSE partials swap into the region, not wipe the page. */}}
+<div class="live-region"
+     id="live-config-channels"
+     hx-get="{{route "partial.config.channels"}}"
+     hx-trigger="sse:config"
+     hx-target="this"
+     hx-select="unset"
+     hx-swap="innerHTML"
+     hx-sync="this:queue last">
+  {{template "config_channels_list" .}}
+</div>
+</div>
+{{end}}
+
+{{define "config_channels_list"}}
+<div class="section">
+  <h2>Mapped channels</h2>
+  {{if .Config.Channels}}
+  <div class="table-scroll">
+  <table>
+    <thead><tr><th>Channel ID</th><th>Project</th><th></th></tr></thead>
+    <tbody>
+      {{range .Config.Channels}}
+      <tr>
+        <td class="mono">{{.ChannelID}}</td>
+        <td>{{.Project}}</td>
+        <td class="row-actions">
+          <form method="post" action="{{route "config.removeChannel"}}" onsubmit="return confirm('Remove channel {{.ChannelID}}?');">
+            {{template "csrf" $}}
+            <input type="hidden" name="channelId" value="{{.ChannelID}}">
+            <button type="submit" class="btn-danger">Remove</button>
+          </form>
+        </td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  </div>
+  {{else}}
+  <div class="empty">No channels mapped.</div>
+  {{end}}
+</div>
+{{end}}

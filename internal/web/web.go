@@ -133,7 +133,17 @@ func New(cfg *config.Config, sessions *sessionstore.Store, hist *history.Store, 
 		"config.removeChannel":               "/config/channels/remove",
 		"config.setGitHubIdentity":           "/config/github-identities",
 		"config.removeGitHubIdentity":        "/config/github-identities/remove",
-		"config.settings":                    "/config/settings",
+		"config.bot":                         "/config/bot",
+		"config.channels":                    "/config/channels",
+		"config.identities":                  "/config/github-identities",
+		"config.projectNew":                  "/config/projects/new",
+		"config.run":                         "/config/run",
+		"config.worktrees":                   "/config/worktrees",
+		"config.board":                       "/config/board",
+		"config.ci":                          "/config/ci",
+		"config.prlinks":                     "/config/pr-links",
+		"config.risky":                       "/config/risky",
+		"config.resume":                      "/config/resume",
 		"issues":                             "/issues",
 		"issues.project":                     "/projects/",
 		"commits":                            "/commits",
@@ -154,10 +164,22 @@ func New(cfg *config.Config, sessions *sessionstore.Store, hist *history.Store, 
 		"partial.worktrees.table": "/partials/worktrees/table",
 		"partial.issues.table":    "/partials/issues/table",
 		"partial.config.lists":    "/partials/config/lists",
+		"partial.config.channels": "/partials/config/channels",
 	})
 
 	app.TemplateFunc("add", func(a, b int) int { return a + b })
 	app.TemplateFunc("sub", func(a, b int) int { return a - b })
+	// Millisecond durations as compact human text (config hub row values).
+	app.TemplateFunc("msDur", func(ms int) string {
+		d := time.Duration(ms) * time.Millisecond
+		if d >= time.Hour && d%time.Hour == 0 {
+			return fmt.Sprintf("%dh", int(d/time.Hour))
+		}
+		if d >= time.Minute {
+			return fmt.Sprintf("%dm", int(d/time.Minute))
+		}
+		return fmt.Sprintf("%ds", int(d/time.Second))
+	})
 	app.TemplateFunc("markdown", markdown.Render)
 	// shortTime formats a time.Time or RFC3339 string as "2006-01-02 15:04"
 	// (same layout as the commits list Date column).
@@ -179,6 +201,16 @@ func New(cfg *config.Config, sessions *sessionstore.Store, hist *history.Store, 
 	tp.ParseFiles("case_new", "layout.tmpl", "case_new.tmpl")
 	tp.ParseFiles("worktrees", "layout.tmpl", "worktrees.tmpl")
 	tp.ParseFiles("config", "layout.tmpl", "config.tmpl")
+	tp.ParseFiles("config_bot", "layout.tmpl", "config_bot.tmpl", "config_shared.tmpl")
+	tp.ParseFiles("config_channels", "layout.tmpl", "config_channels.tmpl", "config_shared.tmpl")
+	tp.ParseFiles("config_identities", "layout.tmpl", "config_identities.tmpl", "config_shared.tmpl")
+	tp.ParseFiles("config_project_new", "layout.tmpl", "config_project_new.tmpl", "config_shared.tmpl")
+	tp.ParseFiles("config_run", "layout.tmpl", "config_run.tmpl", "config_shared.tmpl")
+	tp.ParseFiles("config_worktrees", "layout.tmpl", "config_worktrees.tmpl", "config_shared.tmpl")
+	tp.ParseFiles("config_board", "layout.tmpl", "config_board.tmpl", "config_shared.tmpl")
+	tp.ParseFiles("config_ci", "layout.tmpl", "config_ci.tmpl", "config_shared.tmpl")
+	tp.ParseFiles("config_prlinks", "layout.tmpl", "config_prlinks.tmpl", "config_shared.tmpl")
+	tp.ParseFiles("config_risky", "layout.tmpl", "config_risky.tmpl", "config_shared.tmpl")
 	tp.ParseFiles("project_config", "layout.tmpl", "project_config.tmpl", "project_config_shared.tmpl")
 	tp.ParseFiles("project_config_workflow", "layout.tmpl", "project_config_workflow.tmpl", "project_config_shared.tmpl")
 	tp.ParseFiles("project_config_integrations", "layout.tmpl", "project_config_integrations.tmpl", "project_config_shared.tmpl")
@@ -329,6 +361,7 @@ func New(cfg *config.Config, sessions *sessionstore.Store, hist *history.Store, 
 	mux.Handle("GET /partials/worktrees/table", s.requireAuth(hime.Handler(s.partialWorktreesTable)))
 	mux.Handle("GET /partials/issues/table", s.requireAuth(hime.Handler(s.partialIssuesTable)))
 	mux.Handle("GET /partials/config/lists", s.requireAdmin(hime.Handler(s.partialConfigLists)))
+	mux.Handle("GET /partials/config/channels", s.requireAdmin(hime.Handler(s.partialConfigChannels)))
 
 	// Admin + CSRF mutations (no-op gates when auth disabled)
 	mux.Handle("POST /worktrees/prune", s.requireAdmin(hime.Handler(s.pruneWorktree)))
@@ -358,7 +391,26 @@ func New(cfg *config.Config, sessions *sessionstore.Store, hist *history.Store, 
 	mux.Handle("POST /config/channels/remove", s.requireAdmin(hime.Handler(s.removeChannel)))
 	mux.Handle("POST /config/github-identities", s.requireAdmin(hime.Handler(s.setGitHubIdentity)))
 	mux.Handle("POST /config/github-identities/remove", s.requireAdmin(hime.Handler(s.removeGitHubIdentity)))
-	mux.Handle("POST /config/settings", s.requireAdmin(hime.Handler(s.updateSettings)))
+	// Config drill-in pages: the hub keeps grouped rows only; every section
+	// lives on a focused sub-page with its own POST handler (no shared
+	// "section" dispatcher — each write has a distinct route + audit entry).
+	mux.Handle("GET /config/bot", s.requireAdmin(hime.Handler(s.configSubPage("config_bot", "Discord bot", false))))
+	mux.Handle("GET /config/channels", s.requireAdmin(hime.Handler(s.configSubPage("config_channels", "Channel map", false))))
+	mux.Handle("GET /config/github-identities", s.requireAdmin(hime.Handler(s.configSubPage("config_identities", "GitHub attribution", true))))
+	mux.Handle("GET /config/projects/new", s.requireAdmin(hime.Handler(s.configSubPage("config_project_new", "Add project", false))))
+	mux.Handle("GET /config/run", s.requireAdmin(hime.Handler(s.configSubPage("config_run", "Run limits", false))))
+	mux.Handle("GET /config/worktrees", s.requireAdmin(hime.Handler(s.configSubPage("config_worktrees", "Worktrees", false))))
+	mux.Handle("GET /config/board", s.requireAdmin(hime.Handler(s.configSubPage("config_board", "Team activity board", false))))
+	mux.Handle("GET /config/ci", s.requireAdmin(hime.Handler(s.configSubPage("config_ci", "CI triage", false))))
+	mux.Handle("GET /config/pr-links", s.requireAdmin(hime.Handler(s.configSubPage("config_prlinks", "Discord PR links", false))))
+	mux.Handle("GET /config/risky", s.requireAdmin(hime.Handler(s.configSubPage("config_risky", "Completion risk paths", false))))
+	mux.Handle("POST /config/run", s.requireAdmin(hime.Handler(s.updateRunSettings)))
+	mux.Handle("POST /config/worktrees", s.requireAdmin(hime.Handler(s.updateWorktreeSettings)))
+	mux.Handle("POST /config/board", s.requireAdmin(hime.Handler(s.updateBoardSettings)))
+	mux.Handle("POST /config/ci", s.requireAdmin(hime.Handler(s.updateCISettings)))
+	mux.Handle("POST /config/pr-links", s.requireAdmin(hime.Handler(s.updateDiscordPRLinkSettings)))
+	mux.Handle("POST /config/risky", s.requireAdmin(hime.Handler(s.updateRiskyPathSettings)))
+	mux.Handle("POST /config/resume", s.requireAdmin(hime.Handler(s.updateResumeSettings)))
 
 	app.Handler(mux)
 	s.app = app
@@ -838,6 +890,35 @@ func (s *Server) partialConfigLists(ctx *hime.Context) error {
 	return s.viewFragment(ctx, "config", "config_lists", d)
 }
 
+func (s *Server) partialConfigChannels(ctx *hime.Context) error {
+	d := s.basePage(ctx)
+	d.Config = s.cfg.Snapshot()
+	return s.viewFragment(ctx, "config_channels", "config_channels_list", d)
+}
+
+// configSubPage renders one focused config drill-in page. All sub-pages share
+// the hub's data shape (a fresh config snapshot + flash/err from the query);
+// withIdentities additionally resolves Discord display names, which may call
+// the Discord API — only the attribution page pays that cost.
+func (s *Server) configSubPage(tmpl, title string, withIdentities bool) func(*hime.Context) error {
+	return func(ctx *hime.Context) error {
+		d := s.basePage(ctx)
+		d.Title = title + " · Config"
+		d.IsConfig = true
+		d.Config = s.cfg.Snapshot()
+		d.Flash = ctx.FormValue("ok")
+		d.Error = ctx.FormValue("err")
+		if withIdentities && len(d.Config.GitHubIdentities) > 0 {
+			ids := make([]string, 0, len(d.Config.GitHubIdentities))
+			for _, row := range d.Config.GitHubIdentities {
+				ids = append(ids, row.DiscordUserID)
+			}
+			d.DiscordUserNames = s.resolveDiscordUserNames(ids)
+		}
+		return s.viewPage(ctx, tmpl, d)
+	}
+}
+
 func (s *Server) worktreesRedirect(ctx *hime.Context, okMsg string, err error) error {
 	q := url.Values{}
 	if err != nil {
@@ -1217,7 +1298,7 @@ func (s *Server) setGuild(ctx *hime.Context) error {
 	id := ctx.PostFormValue("discordGuildId")
 	err := s.cfg.SetDiscordGuildID(id)
 	s.auditAction(ctx, "config.set_guild", err, map[string]any{"guildId": id})
-	return s.configRedirect(ctx, "Updated default Discord guild id (fallback)", err)
+	return s.configPageRedirect(ctx, "config.bot", "Updated default Discord guild id (fallback)", err)
 }
 
 func (s *Server) addProjectUser(ctx *hime.Context) error {
@@ -1302,7 +1383,10 @@ func (s *Server) addChannel(ctx *hime.Context) error {
 	if ctx.PostFormValue("return_to") == "project" {
 		return s.projectConfigTabRedirect(ctx, project, "integrations", msg, err)
 	}
-	return s.configRedirect(ctx, msg, err)
+	if err != nil {
+		return s.configPageRedirect(ctx, "config.channels", "", err)
+	}
+	return s.configPageRedirect(ctx, "config.channels", msg, nil)
 }
 
 func (s *Server) removeChannel(ctx *hime.Context) error {
@@ -1313,7 +1397,10 @@ func (s *Server) removeChannel(ctx *hime.Context) error {
 	if ctx.PostFormValue("return_to") == "project" {
 		return s.projectConfigTabRedirect(ctx, ctx.PostFormValue("project"), "integrations", msg, err)
 	}
-	return s.configRedirect(ctx, msg, err)
+	if err != nil {
+		return s.configPageRedirect(ctx, "config.channels", "", err)
+	}
+	return s.configPageRedirect(ctx, "config.channels", msg, nil)
 }
 
 func (s *Server) setGitHubIdentity(ctx *hime.Context) error {
@@ -1328,10 +1415,10 @@ func (s *Server) setGitHubIdentity(ctx *hime.Context) error {
 		"discordUserId": discordID, "login": login,
 	})
 	if err != nil {
-		return s.configRedirect(ctx, "", err)
+		return s.configPageRedirect(ctx, "config.identities", "", err)
 	}
 	msg := fmt.Sprintf("Mapped Discord %s → @%s", discordID, strings.TrimPrefix(login, "@"))
-	return s.configRedirect(ctx, msg, nil)
+	return s.configPageRedirect(ctx, "config.identities", msg, nil)
 }
 
 func (s *Server) removeGitHubIdentity(ctx *hime.Context) error {
@@ -1341,130 +1428,140 @@ func (s *Server) removeGitHubIdentity(ctx *hime.Context) error {
 		"discordUserId": discordID,
 	})
 	if err != nil {
-		return s.configRedirect(ctx, "", err)
+		return s.configPageRedirect(ctx, "config.identities", "", err)
 	}
-	return s.configRedirect(ctx, fmt.Sprintf("Removed GitHub map for Discord %s", discordID), nil)
+	return s.configPageRedirect(ctx, "config.identities", fmt.Sprintf("Removed GitHub map for Discord %s", discordID), nil)
 }
 
-func (s *Server) updateSettings(ctx *hime.Context) error {
-	section := strings.TrimSpace(ctx.PostFormValue("section"))
-	if section == "" {
-		// Backward-compatible posts without section.
-		switch {
-		case strings.TrimSpace(ctx.PostFormValue("autoFixCIMax")) != "":
-			section = "ci"
-		case ctx.PostFormValue("riskyPathGlobs") != "" ||
-			ctx.PostFormValue("riskyPathUseDefault") != "":
-			section = "risky"
-		default:
-			section = "worktree"
+// configPageRedirect sends a config write back to the page it came from
+// (each section's own drill-in page) with a flash or error in the query.
+func (s *Server) configPageRedirect(ctx *hime.Context, routeName, okMsg string, err error) error {
+	if err != nil {
+		return ctx.RedirectTo(routeName, map[string]string{"err": err.Error()})
+	}
+	return ctx.RedirectTo(routeName, map[string]string{"ok": okMsg})
+}
+
+func (s *Server) updateRunSettings(ctx *hime.Context) error {
+	err := s.updateRunSettingsErr(ctx)
+	s.auditAction(ctx, audit.ActionConfigSettings, err, map[string]any{"section": "run"})
+	if err != nil {
+		return s.configPageRedirect(ctx, "config.run", "", err)
+	}
+	maxTurns, _ := strconv.Atoi(strings.TrimSpace(ctx.PostFormValue("maxTurns")))
+	timeoutMs, _ := strconv.Atoi(strings.TrimSpace(ctx.PostFormValue("timeoutMs")))
+	mins := float64(timeoutMs) / 60000
+	msg := fmt.Sprintf("Grok run limits: maxTurns=%d, timeoutMs=%d (%.1f min)", maxTurns, timeoutMs, mins)
+	return s.configPageRedirect(ctx, "config.run", msg, nil)
+}
+
+func (s *Server) updateWorktreeSettings(ctx *hime.Context) error {
+	err := s.updateWorktreeSettingsErr(ctx)
+	s.auditAction(ctx, audit.ActionConfigSettings, err, map[string]any{"section": "worktree"})
+	if err != nil {
+		return s.configPageRedirect(ctx, "config.worktrees", "", err)
+	}
+	days, _ := strconv.Atoi(strings.TrimSpace(ctx.PostFormValue("worktreeIdleTTLDays")))
+	worktreeDir := strings.TrimSpace(ctx.PostFormValue("worktreeDir"))
+	msg := fmt.Sprintf("Worktree idle TTL set to %d day(s)", days)
+	if days == 0 {
+		msg = "Worktree idle cleanup disabled"
+	}
+	if worktreeDir == "" {
+		msg += "; new worktrees use data/worktrees"
+	} else {
+		msg += "; new worktrees use " + worktreeDir
+	}
+	return s.configPageRedirect(ctx, "config.worktrees", msg, nil)
+}
+
+func (s *Server) updateBoardSettings(ctx *hime.Context) error {
+	err := s.updateBoardSettingsErr(ctx)
+	s.auditAction(ctx, audit.ActionConfigSettings, err, map[string]any{"section": "board"})
+	if err != nil {
+		return s.configPageRedirect(ctx, "config.board", "", err)
+	}
+	days, _ := strconv.Atoi(strings.TrimSpace(ctx.PostFormValue("boardStaleDays")))
+	channel := strings.TrimSpace(ctx.PostFormValue("boardDigestChannel"))
+	msg := fmt.Sprintf("Board stale threshold set to %d day(s)", days)
+	if channel == "" {
+		msg += "; nightly digest disabled"
+	} else {
+		msg += fmt.Sprintf("; digest channel %s", channel)
+	}
+	return s.configPageRedirect(ctx, "config.board", msg, nil)
+}
+
+func (s *Server) updateCISettings(ctx *hime.Context) error {
+	err := s.updateCISettingsErr(ctx)
+	s.auditAction(ctx, audit.ActionConfigSettings, err, map[string]any{"section": "ci"})
+	if err != nil {
+		return s.configPageRedirect(ctx, "config.ci", "", err)
+	}
+	enabled := ctx.PostFormValue("autoFixCI") == "1" || strings.EqualFold(ctx.PostFormValue("autoFixCI"), "on")
+	maxAttempts, _ := strconv.Atoi(strings.TrimSpace(ctx.PostFormValue("autoFixCIMax")))
+	msg := "Auto CI fix disabled"
+	if enabled {
+		msg = fmt.Sprintf("Auto CI fix enabled (max %d attempt(s) per thread)", maxAttempts)
+	}
+	return s.configPageRedirect(ctx, "config.ci", msg, nil)
+}
+
+func (s *Server) updateRiskyPathSettings(ctx *hime.Context) error {
+	err := s.updateRiskyPathSettingsErr(ctx)
+	s.auditAction(ctx, audit.ActionConfigSettings, err, map[string]any{"section": "risky"})
+	if err != nil {
+		return s.configPageRedirect(ctx, "config.risky", "", err)
+	}
+	useDefault := ctx.PostFormValue("riskyPathUseDefault") == "1" ||
+		strings.EqualFold(ctx.PostFormValue("riskyPathUseDefault"), "on")
+	msg := "Risky path globs set to built-in defaults"
+	if !useDefault {
+		n := 0
+		for _, line := range strings.Split(ctx.PostFormValue("riskyPathGlobs"), "\n") {
+			line = strings.TrimSpace(line)
+			if line != "" && !strings.HasPrefix(line, "#") {
+				n++
+			}
+		}
+		if n == 0 {
+			msg = "Risky path flags disabled (empty custom list)"
+		} else {
+			msg = fmt.Sprintf("Saved %d risky path glob(s)", n)
 		}
 	}
+	return s.configPageRedirect(ctx, "config.risky", msg, nil)
+}
 
-	var err error
-	switch section {
-	case "ci":
-		err = s.updateCISettingsErr(ctx)
-	case "risky":
-		err = s.updateRiskyPathSettingsErr(ctx)
-	case "worktree":
-		err = s.updateWorktreeSettingsErr(ctx)
-	case "run":
-		err = s.updateRunSettingsErr(ctx)
-	case "board":
-		err = s.updateBoardSettingsErr(ctx)
-	case "resume":
-		err = s.updateResumeSettingsErr(ctx)
-	case "discordPRLink":
-		err = s.updateDiscordPRLinkSettingsErr(ctx)
-	default:
-		err = fmt.Errorf("unknown settings section %q", section)
+func (s *Server) updateDiscordPRLinkSettings(ctx *hime.Context) error {
+	err := s.updateDiscordPRLinkSettingsErr(ctx)
+	s.auditAction(ctx, audit.ActionConfigSettings, err, map[string]any{"section": "discordPRLink"})
+	if err != nil {
+		return s.configPageRedirect(ctx, "config.prlinks", "", err)
 	}
-	s.auditAction(ctx, audit.ActionConfigSettings, err, map[string]any{"section": section})
+	msg := "Discord PR links: GitHub"
+	if strings.TrimSpace(ctx.PostFormValue("discordPRLink")) == config.DiscordPRLinkWeb {
+		msg = "Discord PR links: web UI"
+		if s.cfg.WebPublicBaseURLValue() == "" {
+			msg += " (set webPublicBaseURL so links resolve)"
+		}
+	}
+	return s.configPageRedirect(ctx, "config.prlinks", msg, nil)
+}
+
+// updateResumeSettings has no drill-in page — its toggle lives on the hub.
+func (s *Server) updateResumeSettings(ctx *hime.Context) error {
+	err := s.updateResumeSettingsErr(ctx)
+	s.auditAction(ctx, audit.ActionConfigSettings, err, map[string]any{"section": "resume"})
 	if err != nil {
 		return s.configRedirect(ctx, "", err)
 	}
-	// Success messages match previous helpers.
-	switch section {
-	case "ci":
-		enabled := ctx.PostFormValue("autoFixCI") == "1" || strings.EqualFold(ctx.PostFormValue("autoFixCI"), "on")
-		rawMax := strings.TrimSpace(ctx.PostFormValue("autoFixCIMax"))
-		maxAttempts, _ := strconv.Atoi(rawMax)
-		msg := "Auto CI fix disabled"
-		if enabled {
-			msg = fmt.Sprintf("Auto CI fix enabled (max %d attempt(s) per thread)", maxAttempts)
-		}
-		return s.configRedirect(ctx, msg, nil)
-	case "risky":
-		useDefault := ctx.PostFormValue("riskyPathUseDefault") == "1" ||
-			strings.EqualFold(ctx.PostFormValue("riskyPathUseDefault"), "on")
-		text := ctx.PostFormValue("riskyPathGlobs")
-		msg := "Risky path globs set to built-in defaults"
-		if !useDefault {
-			n := 0
-			for _, line := range strings.Split(text, "\n") {
-				line = strings.TrimSpace(line)
-				if line != "" && !strings.HasPrefix(line, "#") {
-					n++
-				}
-			}
-			if n == 0 {
-				msg = "Risky path flags disabled (empty custom list)"
-			} else {
-				msg = fmt.Sprintf("Saved %d risky path glob(s)", n)
-			}
-		}
-		return s.configRedirect(ctx, msg, nil)
-	case "worktree":
-		raw := strings.TrimSpace(ctx.PostFormValue("worktreeIdleTTLDays"))
-		days, _ := strconv.Atoi(raw)
-		worktreeDir := strings.TrimSpace(ctx.PostFormValue("worktreeDir"))
-		msg := fmt.Sprintf("Worktree idle TTL set to %d day(s)", days)
-		if days == 0 {
-			msg = "Worktree idle cleanup disabled"
-		}
-		if worktreeDir == "" {
-			msg += "; new worktrees use data/worktrees"
-		} else {
-			msg += "; new worktrees use " + worktreeDir
-		}
-		return s.configRedirect(ctx, msg, nil)
-	case "run":
-		maxTurns, _ := strconv.Atoi(strings.TrimSpace(ctx.PostFormValue("maxTurns")))
-		timeoutMs, _ := strconv.Atoi(strings.TrimSpace(ctx.PostFormValue("timeoutMs")))
-		mins := float64(timeoutMs) / 60000
-		msg := fmt.Sprintf("Grok run limits: maxTurns=%d, timeoutMs=%d (%.1f min)", maxTurns, timeoutMs, mins)
-		return s.configRedirect(ctx, msg, nil)
-	case "board":
-		days, _ := strconv.Atoi(strings.TrimSpace(ctx.PostFormValue("boardStaleDays")))
-		channel := strings.TrimSpace(ctx.PostFormValue("boardDigestChannel"))
-		msg := fmt.Sprintf("Board stale threshold set to %d day(s)", days)
-		if channel == "" {
-			msg += "; nightly digest disabled"
-		} else {
-			msg += fmt.Sprintf("; digest channel %s", channel)
-		}
-		return s.configRedirect(ctx, msg, nil)
-	case "resume":
-		enabled := ctx.PostFormValue("resumeActiveRuns") == "1" || strings.EqualFold(ctx.PostFormValue("resumeActiveRuns"), "on")
-		msg := "Crash-safe resume disabled"
-		if enabled {
-			msg = "Crash-safe resume enabled"
-		}
-		return s.configRedirect(ctx, msg, nil)
-	case "discordPRLink":
-		mode := strings.TrimSpace(ctx.PostFormValue("discordPRLink"))
-		msg := "Discord PR links: GitHub"
-		if mode == config.DiscordPRLinkWeb {
-			msg = "Discord PR links: web UI"
-			if s.cfg.WebPublicBaseURLValue() == "" {
-				msg += " (set webPublicBaseURL so links resolve)"
-			}
-		}
-		return s.configRedirect(ctx, msg, nil)
-	default:
-		return s.configRedirect(ctx, "Settings saved", nil)
+	enabled := ctx.PostFormValue("resumeActiveRuns") == "1" || strings.EqualFold(ctx.PostFormValue("resumeActiveRuns"), "on")
+	msg := "Crash-safe resume disabled"
+	if enabled {
+		msg = "Crash-safe resume enabled"
 	}
+	return s.configRedirect(ctx, msg, nil)
 }
 
 func (s *Server) updateDiscordPRLinkSettingsErr(ctx *hime.Context) error {

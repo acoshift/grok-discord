@@ -55,6 +55,25 @@
   {{template "session_live" .}}
 </div>
 
+{{if .CanStartSession}}
+{{/* Docked conversation composer. Lives OUTSIDE #live-session on purpose:
+     SSE swaps must never wipe an in-progress prompt (the live-partial tests
+     pin session-continue-form out of the fragment). Desktop: sticky at the
+     bottom of the conversation column. Phone: fixed bottom bar replacing the
+     tab bar on this page (see the :has(#page-session) rules in layout). */}}
+<div class="composer-dock" id="session-continue-form">
+  <form method="post" action="/sessions/{{.ThreadID}}/continue" class="composer">
+    {{template "csrf" $}}
+    <label for="continue-prompt" class="sr-only">Prompt</label>
+    <textarea id="continue-prompt" name="prompt" rows="1" required placeholder="What should Grok do next?"></textarea>
+    <button type="submit" id="btn-continue" class="composer-send" title="Continue with Grok" aria-label="Continue with Grok">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>
+    </button>
+  </form>
+  <p class="composer-hint"><span>Queues a follow-up on this work unit — no new Discord thread.</span><span class="composer-kbd"><kbd>⌘</kbd><kbd>↩</kbd> send</span></p>
+</div>
+{{end}}
+
 </div>{{/* /pr-main */}}
 
 <aside class="pr-rail">
@@ -154,24 +173,6 @@
 {{end}}
 
 {{if .CanStartSession}}
-<div class="rail-group" id="session-continue-form">
-  <div class="rail-group-title">Grok</div>
-  <details class="action" open>
-    <summary><span class="action-title">Continue with Grok</span></summary>
-    <div class="action-body">
-      <form method="post" action="/sessions/{{.ThreadID}}/continue">
-        {{template "csrf" $}}
-        <div class="field">
-          <label for="continue-prompt">Prompt</label>
-          <textarea id="continue-prompt" name="prompt" rows="4" required placeholder="What should Grok do next?"></textarea>
-        </div>
-        <div class="form-actions"><button type="submit" id="btn-continue">Continue</button></div>
-      </form>
-      <p class="rail-note" style="margin-top:0.55rem">Queues a follow-up on this work unit only (does not create a new Discord thread).</p>
-    </div>
-  </details>
-</div>
-
 <div class="rail-group" id="session-lifecycle">
   <div class="rail-group-title">Lifecycle</div>
   <details class="action">
@@ -387,7 +388,29 @@
   <h2>Turns <span class="muted" style="font-weight:500;font-size:0.9rem">({{if .RunBusy}}{{add $done 1}}{{else}}{{$done}}{{end}})</span></h2>
   {{if or .Thread.Turns .RunBusy}}
   <div class="turns" id="turns">
-    {{/* Newest first so long replies do not bury the live/latest turn. #N stays chronological. */}}
+    {{/* Chronological (latest at the bottom, next to the docked composer);
+         layout JS pins the viewport to the newest turn so it is never buried. */}}
+    {{range $i, $t := .Thread.Turns}}
+    <article class="turn">
+      <header class="turn-meta">
+        <span class="mono muted">#{{add $i 1}}</span>
+        <span class="badge status-{{$t.Status}}">{{$t.Status}}</span>
+        {{if $t.User}}<span>{{$t.User}}</span>{{end}}
+      </header>
+      <div class="bubble user">
+        <div class="bubble-label">User</div>
+        <div class="bubble-body md">{{markdown $t.Prompt}}</div>
+      </div>
+      <div class="bubble assistant">
+        <div class="bubble-label">Grok</div>
+        {{if $t.Response}}
+        <div class="bubble-body md">{{markdown $t.Response}}</div>
+        {{else}}
+        <div class="bubble-body muted">(no response text yet)</div>
+        {{end}}
+      </div>
+    </article>
+    {{end}}
     {{if .RunBusy}}
     <article class="turn turn-live" id="turn-live">
       <header class="turn-meta">
@@ -410,32 +433,6 @@
         {{end}}
       </div>
     </article>
-    {{end}}
-    {{$turns := .Thread.Turns}}
-    {{$n := len $turns}}
-    {{range $i, $_ := $turns}}
-    {{$ri := sub (sub $n 1) $i}}
-    {{with $t := index $turns $ri}}
-    <article class="turn">
-      <header class="turn-meta">
-        <span class="mono muted">#{{add $ri 1}}</span>
-        <span class="badge status-{{$t.Status}}">{{$t.Status}}</span>
-        {{if $t.User}}<span>{{$t.User}}</span>{{end}}
-      </header>
-      <div class="bubble user">
-        <div class="bubble-label">User</div>
-        <div class="bubble-body md">{{markdown $t.Prompt}}</div>
-      </div>
-      <div class="bubble assistant">
-        <div class="bubble-label">Grok</div>
-        {{if $t.Response}}
-        <div class="bubble-body md">{{markdown $t.Response}}</div>
-        {{else}}
-        <div class="bubble-body muted">(no response text yet)</div>
-        {{end}}
-      </div>
-    </article>
-    {{end}}
     {{end}}
   </div>
   {{else}}

@@ -1,0 +1,32 @@
+{{define "content"}}
+<div class="config-sub" id="page-config-prlinks">
+{{template "config_sub_header" $}}
+<h1>Discord PR links</h1>
+<p class="sub">
+  When the bot posts a pull request link in Discord (status cards, brief, completion, timeline, review pings),
+  choose whether to open GitHub or this web UI. Stored session data always keeps the GitHub URL for <span class="mono">gh</span>.
+</p>
+<div class="section card">
+  <form class="inline" method="post" action="{{route "config.prlinks"}}" style="grid-template-columns: 1fr auto;">
+    {{template "csrf" $}}
+    <div>
+      <label for="discord-pr-link">Link target</label>
+      <select id="discord-pr-link" name="discordPRLink">
+        <option value="github" {{if ne .Config.DiscordPRLink "web"}}selected{{end}}>GitHub (github.com/…/pull/N)</option>
+        <option value="web" {{if eq .Config.DiscordPRLink "web"}}selected{{end}}>Web UI (/prs/owner/repo/N)</option>
+      </select>
+    </div>
+    <button type="submit">Save</button>
+  </form>
+  {{if eq .Config.DiscordPRLink "web"}}
+    {{if .Config.WebPublicBaseURL}}
+  <p class="sub" style="margin:0.5rem 0 0">Base: <span class="mono">{{.Config.WebPublicBaseURL}}</span> — example: <span class="mono">{{.Config.WebPublicBaseURL}}/prs/owner/repo/42</span></p>
+    {{else}}
+  <div class="flash err" style="margin:0.65rem 0 0">Web mode is on, but <span class="mono">webPublicBaseURL</span> is empty — Discord will fall back to GitHub until you set a public origin (config or <span class="mono">GROK_WORK_PUBLIC_BASE_URL</span>).</div>
+    {{end}}
+  {{else}}
+  <p class="sub" style="margin:0.5rem 0 0">Default is GitHub. Web mode needs <span class="mono">webPublicBaseURL</span> so links are absolute and clickable.</p>
+  {{end}}
+</div>
+</div>
+{{end}}

@@ -1,0 +1,5 @@
+{{define "config_sub_header"}}
+<p class="pr-crumb"><a href="{{route "config"}}">← Config</a></p>
+{{if .Flash}}<div class="flash">{{.Flash}}</div>{{end}}
+{{if .Error}}<div class="flash err">{{.Error}}</div>{{end}}
+{{end}}

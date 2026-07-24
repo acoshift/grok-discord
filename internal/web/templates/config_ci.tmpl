@@ -1,0 +1,27 @@
+{{define "content"}}
+<div class="config-sub" id="page-config-ci">
+{{template "config_sub_header" $}}
+<h1>CI triage</h1>
+<p class="sub">
+  When a thread’s PR has failing checks, the bot posts a digest and offers <span class="mono">@Grok /fix-ci</span>.
+  Optionally auto-queue a fix (default off). Cap is per Discord thread session.
+</p>
+<div class="section card">
+  <form class="inline" method="post" action="{{route "config.ci"}}" style="grid-template-columns: auto 1fr auto;">
+    {{template "csrf" $}}
+    <div>
+      <label class="check">
+        <input type="checkbox" name="autoFixCI" value="1" {{if .Config.AutoFixCI}}checked{{end}}>
+        Auto-queue CI fix
+      </label>
+    </div>
+    <div>
+      <label for="auto-fix-ci-max">Max auto attempts</label>
+      <input id="auto-fix-ci-max" type="number" name="autoFixCIMax" min="1" step="1" required value="{{.Config.AutoFixCIMax}}" autocomplete="off">
+    </div>
+    <button type="submit">Save</button>
+  </form>
+  <p class="sub" style="margin:0.5rem 0 0">Max is per Discord thread session (default 2). Manual <span class="mono">/fix-ci</span> is always available.</p>
+</div>
+</div>
+{{end}}
