@@ -125,11 +125,18 @@ func caseSeverityRank(severity string) int {
 }
 
 // ListCaseBoard collects Mode=case sessions grouped by phase. projectFilter
-// empty means all projects (used by SSE fingerprinting; web pages are always
-// project-scoped). Pipeline counts cover the project-filtered set; Groups
-// honor phase/severity/scope. scope "" or "open" hides closed unless the
-// phase filter explicitly asks for closed.
+// empty means all projects (SSE fingerprinting and the global cases board).
+// Pipeline counts cover the project-filtered set; Groups honor
+// phase/severity/scope. scope "" or "open" hides closed unless the phase
+// filter explicitly asks for closed.
 func (b *Bot) ListCaseBoard(projectFilter, phaseFilter, severityFilter, scope string) CaseBoard {
+	return b.ListCaseBoardAmong(projectFilter, phaseFilter, severityFilter, scope, nil)
+}
+
+// ListCaseBoardAmong is ListCaseBoard restricted to the given project names
+// (nil = unrestricted). The web layer passes a member's visible projects so
+// the global board never leaks cases from projects they cannot open.
+func (b *Bot) ListCaseBoardAmong(projectFilter, phaseFilter, severityFilter, scope string, among []string) CaseBoard {
 	phaseFilter = strings.ToLower(strings.TrimSpace(phaseFilter))
 	severityFilter = strings.ToLower(strings.TrimSpace(severityFilter))
 	scope = strings.ToLower(strings.TrimSpace(scope))
@@ -146,6 +153,17 @@ func (b *Bot) ListCaseBoard(projectFilter, phaseFilter, severityFilter, scope st
 		return board
 	}
 
+	var allowed map[string]struct{}
+	if among != nil {
+		allowed = make(map[string]struct{}, len(among))
+		for _, n := range among {
+			n = strings.TrimSpace(n)
+			if n != "" {
+				allowed[n] = struct{}{}
+			}
+		}
+	}
+
 	var rows []CaseRow
 	for _, listed := range b.sessions.List() {
 		e := listed.Entry
@@ -154,6 +172,11 @@ func (b *Bot) ListCaseBoard(projectFilter, phaseFilter, severityFilter, scope st
 		}
 		if board.ProjectFilter != "" && !strings.EqualFold(e.Project, board.ProjectFilter) {
 			continue
+		}
+		if allowed != nil {
+			if _, ok := allowed[e.Project]; !ok {
+				continue
+			}
 		}
 		phase := normalizeCasePhase(e)
 		switch phase {

@@ -268,3 +268,57 @@ func TestDetailRoutesEnforceProjectACL(t *testing.T) {
 		t.Fatalf("admin session secret status=%d", w.Code)
 	}
 }
+
+// TestGlobalCasesVisibility: /cases is membership-filtered like /ship — a
+// member sees only their projects' cases; the project chip links each row to
+// its workspace board.
+func TestGlobalCasesVisibility(t *testing.T) {
+	srv := twoProjectAuthServer(t)
+	for _, c := range []struct{ tid, project, title string }{
+		{"case-public", "public", "Public checkout bug"},
+		{"case-secret", "secret", "Secret outage"},
+	} {
+		if err := srv.sessions.Set(c.tid, sessionstore.Entry{
+			Project: c.project, Mode: "case", Phase: sessionstore.PhaseIntake,
+			CustomerTitle: c.title, Severity: "high",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	sid, _, err := srv.LoginAs("member-1", "Member", config.WebRoleMember)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/cases", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sid})
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "Public checkout bug") {
+		t.Fatal("global cases missing public case")
+	}
+	if strings.Contains(body, "Secret outage") || strings.Contains(body, "case-secret") {
+		t.Fatal("global cases leaked secret case")
+	}
+	if !strings.Contains(body, `class="case-proj" href="/projects/public/cases"`) {
+		t.Fatal("global cases missing project chip")
+	}
+
+	// Admin sees both projects' cases.
+	asid, _, err := srv.LoginAs("admin-1", "Admin", config.WebRoleAdmin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req = httptest.NewRequest(http.MethodGet, "/cases", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: asid})
+	w = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	body = w.Body.String()
+	if !strings.Contains(body, "Public checkout bug") || !strings.Contains(body, "Secret outage") {
+		t.Fatal("admin global cases missing rows")
+	}
+}

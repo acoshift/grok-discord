@@ -140,6 +140,10 @@ func (s *Server) postSessionContinue(ctx *hime.Context) error {
 	if prompt == "" {
 		return s.sessionRedirect(ctx, threadID, "", "prompt is required")
 	}
+	// K18: close is terminal — a closed case never revives on this thread.
+	if ent, ok := s.sessions.Get(threadID); ok && ent.IsCaseClosed() {
+		return s.sessionRedirect(ctx, threadID, "", "case is closed — open a new case instead of continuing this one")
+	}
 	if err := s.checkFixRate(ctx); err != nil {
 		s.auditAction(ctx, audit.ActionSessionStart, err, map[string]any{
 			"kind": "continue", "threadId": threadID,

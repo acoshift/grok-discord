@@ -104,6 +104,7 @@ func New(cfg *config.Config, sessions *sessionstore.Store, hist *history.Store, 
 		"sessions":                           "/sessions",
 		"sessions.thread":                    "/sessions/",
 		"ship":                               "/ship",
+		"cases":                              "/cases",
 		"worktrees":                          "/worktrees",
 		"worktrees.prune":                    "/worktrees/prune",
 		"worktrees.pruneIdle":                "/worktrees/prune-idle",
@@ -251,6 +252,7 @@ func New(cfg *config.Config, sessions *sessionstore.Store, hist *history.Store, 
 	mux.Handle("GET /sessions/{threadID}/diff/file", s.requireAuth(hime.Handler(s.sessionDiffFile)))
 	mux.Handle("GET /sessions/{threadID}", s.requireAuth(hime.Handler(s.sessionPage)))
 	mux.Handle("GET /ship", s.requireAuth(hime.Handler(s.shipPage)))
+	mux.Handle("GET /cases", s.requireAuth(hime.Handler(s.casesGlobal)))
 	mux.Handle("GET /worktrees", s.requireAuth(hime.Handler(s.worktreesPage)))
 	mux.Handle("GET /config", s.requireAdmin(hime.Handler(s.configPage)))
 	mux.Handle("GET /config/projects/{name}", s.requireAdmin(hime.Handler(s.projectConfigPage)))

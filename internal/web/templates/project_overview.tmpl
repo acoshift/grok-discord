@@ -28,9 +28,6 @@
 <div class="section m-only" id="m-workspace-browse">
   <h2>Browse</h2>
   <div class="m-rows">
-    <a class="m-row" href="/projects/{{.Project}}/reviews">
-      <span class="m-row-main"><span class="m-row-t">Reviews</span><span class="m-row-s">team review queue for this project</span></span>
-    </a>
     <a class="m-row" href="/projects/{{.Project}}/issues">
       <span class="m-row-main"><span class="m-row-t">Issues</span><span class="m-row-s">GitHub issues across project repos</span></span>
     </a>
@@ -45,6 +42,11 @@
     <a class="m-row" href="/projects/{{.Project}}/worktrees">
       <span class="m-row-main"><span class="m-row-t">Worktrees</span><span class="m-row-s">per-thread checkouts · prune</span></span>
     </a>
+    {{if .IsAdmin}}
+    <a class="m-row" href="/config/projects/{{.Project}}">
+      <span class="m-row-main"><span class="m-row-t">Settings</span><span class="m-row-s">members · workflow · integrations</span></span>
+    </a>
+    {{end}}
   </div>
 </div>
 

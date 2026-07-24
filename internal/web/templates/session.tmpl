@@ -55,8 +55,9 @@
   {{template "session_live" .}}
 </div>
 
-{{if .CanStartSession}}
-{{/* Docked conversation composer. Lives OUTSIDE #live-session on purpose:
+{{if and .CanStartSession (not .SessionEntry.IsCaseClosed)}}
+{{/* Docked conversation composer. Closed cases hide it — the web continue
+     endpoint rejects them (close is terminal; open a new case instead). Lives OUTSIDE #live-session on purpose:
      SSE swaps must never wipe an in-progress prompt (the live-partial tests
      pin session-continue-form out of the fragment). Desktop: sticky at the
      bottom of the conversation column. Phone: fixed bottom bar replacing the
@@ -173,6 +174,7 @@
 {{end}}
 
 {{if .CanStartSession}}
+{{if not .SessionEntry.IsCaseClosed}}
 <div class="rail-group" id="session-lifecycle">
   <div class="rail-group-title">Lifecycle</div>
   <details class="action">
@@ -211,6 +213,8 @@
     </div>
   </details>
 </div>
+
+{{end}}
 
 <div class="rail-group" id="session-ownership">
   <div class="rail-group-title">Ownership</div>

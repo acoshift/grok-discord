@@ -205,3 +205,54 @@ func TestOverviewCaseCounts(t *testing.T) {
 		}
 	}
 }
+
+// TestClosedCaseHidesContinueAndRejectsPost: a closed case is terminal — the
+// session page drops the composer and lifecycle controls, and a direct POST
+// to /continue is refused.
+func TestClosedCaseHidesContinueAndRejectsPost(t *testing.T) {
+	srv, _, _ := fixEnabledServer(t)
+	_ = srv.cfg.AddProjectAllowedUser("proj", "member-1")
+	seedCaseSession(t, srv, "t-done", "member-1")
+	sid, csrf, err := srv.LoginAs("member-1", "Member", config.WebRoleMember)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := postFix(t, srv, "/sessions/t-done/case/close", sid, csrf, url.Values{
+		"resolution": {"answered"},
+	})
+	if w.Code != http.StatusSeeOther && w.Code != http.StatusFound {
+		t.Fatalf("close status=%d body=%s", w.Code, w.Body.String())
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/sessions/t-done", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sid})
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("session page status=%d", rec.Code)
+	}
+	body := rec.Body.String()
+	// Match element ids — the layout JS legitimately mentions the composer id.
+	for _, ban := range []string{`id="session-continue-form"`, `id="btn-continue"`, `id="session-lifecycle"`} {
+		if strings.Contains(body, ban) {
+			t.Fatalf("closed case page must not render %q", ban)
+		}
+	}
+	// Ownership and reset stay available for cleanup.
+	for _, want := range []string{"session-ownership", "Reset session"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("closed case page missing %q", want)
+		}
+	}
+
+	w = postFix(t, srv, "/sessions/t-done/continue", sid, csrf, url.Values{
+		"prompt": {"please revive"},
+	})
+	if w.Code != http.StatusSeeOther && w.Code != http.StatusFound {
+		t.Fatalf("continue status=%d body=%s", w.Code, w.Body.String())
+	}
+	loc := w.Header().Get("Location")
+	if !strings.Contains(loc, "err=") || !strings.Contains(loc, "closed") {
+		t.Fatalf("continue on closed case must redirect with error, got %q", loc)
+	}
+}

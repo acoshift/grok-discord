@@ -158,6 +158,8 @@ func TestPagesRender(t *testing.T) {
 		{"/projects/proj/sessions", `id="page-sessions"`},
 		{"/projects/proj/worktrees", `id="page-worktrees"`},
 		// Config hub: grouped drill-in rows; sections live on focused pages.
+		{"/cases", `id="page-cases"`},
+		{"/cases", `id="case-pipeline"`},
 		{"/config", `id="page-config"`},
 		{"/config", `href="/config/bot"`},
 		{"/config", `href="/config/channels"`},
@@ -689,6 +691,7 @@ func TestNavBrandChrome(t *testing.T) {
 		`data-scope=""`,
 		">Projects<",
 		">Ship<",
+		">Cases<",
 		">Sessions<",
 		">Worktrees<",
 		">Config<",
@@ -700,7 +703,7 @@ func TestNavBrandChrome(t *testing.T) {
 			t.Fatalf("global chrome missing %q", want)
 		}
 	}
-	for _, ban := range []string{">Dashboard<", ">Issues<", ">Commits<", ">Cases<", ">History</a>", "Grok Discord"} {
+	for _, ban := range []string{">Dashboard<", ">Issues<", ">Commits<", ">History</a>", "Grok Discord"} {
 		if strings.Contains(body, ban) {
 			t.Fatalf("global chrome must not contain %q", ban)
 		}
@@ -759,7 +762,7 @@ func TestNavBrandChrome(t *testing.T) {
 		`href="/projects/proj/ship" data-icon="ship" class="">Ship</a>`,
 		`href="/projects/proj/cases" data-icon="cases" class="">Cases</a>`,
 		`href="/projects/proj/sessions" data-icon="sessions" class="">Sessions</a>`,
-		`href="/config/projects/proj" data-icon="config" class="">Settings</a>`,
+		`href="/projects/proj/reviews" data-icon="issues" class="">Reviews</a>`,
 		`class="ws-back" href="/"`,
 		`class="ws-start" href="/projects/proj/start"`,
 	} {
@@ -767,8 +770,10 @@ func TestNavBrandChrome(t *testing.T) {
 			t.Fatalf("workspace tab bar missing %q", want)
 		}
 	}
-	if strings.Contains(tabbar, ">Projects</a>") {
-		t.Fatal("workspace tab bar must not contain the global Projects tab")
+	// Config is deliberately not a tab in either scope (rarely used; it keeps
+	// a drill-in row on the Projects home / workspace Browse instead).
+	if strings.Contains(tabbar, ">Projects</a>") || strings.Contains(tabbar, ">Settings</a>") {
+		t.Fatal("workspace tab bar must not contain global Projects or Settings tabs")
 	}
 }
 
@@ -787,6 +792,7 @@ func TestNavScopeRules(t *testing.T) {
 		{"/", ""},
 		{"/ship", ""},
 		{"/ship?project=proj", ""}, // data filter, not workspace scope
+		{"/cases", ""},
 		{"/projects/proj", "proj"},
 		{"/projects/proj/ship", "proj"},
 		{"/projects/proj/cases", "proj"},

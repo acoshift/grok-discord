@@ -584,11 +584,14 @@
     }
 
     /* Page enter: #live-root is replaced on every boosted navigation, so this
-       replays per page, not per SSE region swap. */
+       replays per page, not per SSE region swap. Opacity ONLY — an animated
+       transform (even one that fills to none) leaves #live-root a containing
+       block for position:fixed descendants in Chrome, which trapped the
+       session composer at the bottom of the content instead of the viewport. */
     #live-root { animation: pageIn 0.22s cubic-bezier(0.22, 0.8, 0.36, 1) both; }
     @keyframes pageIn {
-      from { opacity: 0; transform: translateY(5px); }
-      to { opacity: 1; transform: none; }
+      from { opacity: 0; }
+      to { opacity: 1; }
     }
     @keyframes pulse {
       0% { box-shadow: 0 0 0 0 hsl(136 70% 40% / 35%); }
@@ -1852,6 +1855,18 @@
     }
     .case-meta .mono { font-size: 0.74rem; }
     .case-meta .case-ref { color: var(--text); font-weight: 500; }
+    /* Global board: which project a case belongs to (links to its board). */
+    .case-meta .case-proj {
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      font-weight: 600;
+      color: var(--text);
+      background: var(--surface-l2);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 0 0.5rem;
+    }
+    .case-meta .case-proj:hover { text-decoration: none; border-color: var(--hover-border); }
     .case-sev {
       text-transform: uppercase;
       letter-spacing: 0.06em;
@@ -2620,9 +2635,22 @@
       position: sticky;
       bottom: 0;
       z-index: 5;
-      margin-top: 1.2rem;
+      /* auto: bottom of the conversation column (the column itself is
+         stretched to the viewport on desktop, so short chats still dock). */
+      margin-top: auto;
       padding: 1.4rem 0 0.9rem;
       background: linear-gradient(to bottom, transparent, var(--bg) 38%);
+    }
+    /* Desktop: the conversation column always reaches the viewport bottom —
+       stretch to the grid row (a tall rail) and floor at viewport height, so
+       sticky pins the composer to the fold even for a short chat. */
+    @media (min-width: 921px) {
+      .pr-main:has(.composer-dock) {
+        align-self: stretch;
+        display: flex;
+        flex-direction: column;
+        min-height: calc(100dvh - 10.5rem);
+      }
     }
     .composer {
       display: flex;
@@ -3190,6 +3218,7 @@
         <a href="{{route "home"}}" data-icon="projects" class="{{if .IsDashboard}}active{{end}}">Projects</a>
         <span class="nav-label">Across projects</span>
         <a href="{{route "ship"}}" data-icon="ship" class="{{if .IsShip}}active{{end}}">Ship</a>
+        <a href="{{route "cases"}}" data-icon="cases" class="{{if .IsCases}}active{{end}}">Cases</a>
         <a href="/reviews" data-icon="issues" class="{{if .IsReviews}}active{{end}}">Reviews</a>
         <a href="{{route "sessions"}}" data-icon="sessions" class="{{if .IsSessions}}active{{end}}">Sessions</a>
         <a href="{{route "worktrees"}}" data-icon="worktrees" class="{{if .IsWorktrees}}active{{end}}">Worktrees</a>
@@ -3210,13 +3239,13 @@
           <a href="/projects/{{.NavProject}}/ship" data-icon="ship" class="{{if .IsShip}}active{{end}}">Ship</a>
           <a href="/projects/{{.NavProject}}/cases" data-icon="cases" class="{{if .IsCases}}active{{end}}">Cases</a>
           <a href="/projects/{{.NavProject}}/sessions" data-icon="sessions" class="{{if .IsSessions}}active{{end}}">Sessions</a>
-          {{if .IsAdmin}}<a href="/config/projects/{{.NavProject}}" data-icon="config" class="{{if .IsConfig}}active{{end}}">Settings</a>{{end}}
+          <a href="/projects/{{.NavProject}}/reviews" data-icon="issues" class="{{if .IsReviews}}active{{end}}">Reviews</a>
           {{else}}
           <a href="{{route "home"}}" data-icon="projects" class="{{if .IsDashboard}}active{{end}}">Projects</a>
           <a href="{{route "ship"}}" data-icon="ship" class="{{if .IsShip}}active{{end}}">Ship</a>
+          <a href="{{route "cases"}}" data-icon="cases" class="{{if .IsCases}}active{{end}}">Cases</a>
           <a href="{{route "sessions"}}" data-icon="sessions" class="{{if .IsSessions}}active{{end}}">Sessions</a>
           <a href="/reviews" data-icon="issues" class="{{if .IsReviews}}active{{end}}">Reviews</a>
-          {{if .IsAdmin}}<a href="{{route "config"}}" data-icon="config" class="{{if .IsConfig}}active{{end}}">Config</a>{{end}}
           {{end}}
         </div>
         {{if .NavProject}}
